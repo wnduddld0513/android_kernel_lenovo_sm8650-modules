@@ -13,6 +13,9 @@
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
 #include "cam_req_mgr_dev.h"
+#if IS_ENABLED(CONFIG_HQ_SYSFS_SUPPORT)
+#include <linux/hqsysfs.h>
+#endif
 
 #define CAM_SENSOR_PIPELINE_DELAY_MASK        0xFF
 #define CAM_SENSOR_MODESWITCH_DELAY_SHIFT     8
@@ -982,6 +985,45 @@ void cam_sensor_shutdown(struct cam_sensor_ctrl_t *s_ctrl)
 	s_ctrl->sensor_state = CAM_SENSOR_INIT;
 }
 
+#if IS_ENABLED(CONFIG_HQ_SYSFS_SUPPORT)
+/* Sensors of the Lenovo TB520FU (lapis) and its sibling kirby */
+static const struct {
+	const char *sensor_name;
+	int hwid;
+	const char *hw_name;
+} cam_sensor_hw_info[] = {
+	{ "lapis_lce_gc13a0_main", HWID_MAIN_CAM, "lapis_lce_gc13a0_main_i" },
+	{ "lapis_txd_ov13b10_main", HWID_MAIN_CAM, "lapis_txd_ov13b10_main_ii" },
+	{ "lapis_lce_gc13a2_front", HWID_SUB_CAM, "lapis_lce_gc13a2_front_i" },
+	{ "lapis_txd_gc13a2_front", HWID_SUB_CAM, "lapis_txd_gc13a2_front_ii" },
+	{ "lapis_lce_sc202cs_macro", HWID_MAIN_CAM_2, "lapis_lce_sc202cs_macro_i" },
+	{ "kirby_lce_gc13a0_main", HWID_MAIN_CAM, "kirby_lce_gc13a0_main_i" },
+	{ "kirby_txd_ov13b10_main", HWID_MAIN_CAM, "kirby_txd_ov13b10_main_ii" },
+	{ "kirby_txd_sc820cs_front", HWID_SUB_CAM, "kirby_txd_sc820cs_front_i" },
+	{ "kirby_lce_sc202cs_macro", HWID_MAIN_CAM_2, "kirby_lce_sc202cs_macro_i" },
+};
+
+/* Tell the Lenovo hqsysfs which sensor module was found */
+static void cam_sensor_register_hw_info(struct cam_sensor_ctrl_t *s_ctrl)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(cam_sensor_hw_info); i++) {
+		if (strcmp(s_ctrl->sensor_name, cam_sensor_hw_info[i].sensor_name))
+			continue;
+		hq_register_hw_info(cam_sensor_hw_info[i].hwid,
+			(char *)cam_sensor_hw_info[i].hw_name);
+		return;
+	}
+
+	CAM_ERR(CAM_SENSOR, "sensor name is not support");
+}
+#else
+static void cam_sensor_register_hw_info(struct cam_sensor_ctrl_t *s_ctrl)
+{
+}
+#endif
+
 int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 {
 	int rc = 0;
@@ -1174,6 +1216,8 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			cam_sensor_power_down(s_ctrl);
 			goto free_power_settings;
 		}
+
+		cam_sensor_register_hw_info(s_ctrl);
 
 		if (s_ctrl->i2c_data.reg_bank_lock_settings.is_settings_valid) {
 			rc = cam_sensor_apply_settings(s_ctrl, 0,
