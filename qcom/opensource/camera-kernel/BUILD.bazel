@@ -98,6 +98,7 @@ driver_includes = [
     "drivers/cam_sensor_module/cam_csiphy/include",
     "drivers/cam_sensor_module/cam_eeprom",
     "drivers/cam_sensor_module/cam_flash",
+    "drivers/cam_sensor_module/cam_ldo",
     "drivers/cam_sensor_module/cam_ois",
     "drivers/cam_sensor_module/cam_res_mgr",
     "drivers/cam_sensor_module/cam_sensor",

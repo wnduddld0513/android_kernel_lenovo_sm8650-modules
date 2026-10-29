@@ -9,6 +9,7 @@
 #include "cam_sensor_util.h"
 #include "cam_mem_mgr.h"
 #include "cam_res_mgr_api.h"
+#include "cam_ldo.h"
 
 #define CAM_SENSOR_PINCTRL_STATE_SLEEP "cam_suspend"
 #define CAM_SENSOR_PINCTRL_STATE_DEFAULT "cam_default"
@@ -2313,6 +2314,23 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 				goto power_up_failed;
 			}
 			break;
+		case SENSOR_LDO1:
+		case SENSOR_LDO2:
+		case SENSOR_LDO3:
+		case SENSOR_LDO4:
+		case SENSOR_LDO5:
+		case SENSOR_LDO6:
+		case SENSOR_LDO7:
+		case SENSOR_LDO1P1:
+			rc = cam_ldo_camera_power_up(power_setting->seq_type -
+				SENSOR_LDO1);
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR_UTIL,
+					"camera_power_up_io_type [%d] failed",
+					power_setting->seq_type);
+				goto power_up_failed;
+			}
+			break;
 		default:
 			CAM_ERR(CAM_SENSOR_UTIL, "error power seq type %d",
 				power_setting->seq_type);
@@ -2411,6 +2429,17 @@ power_up_failed:
 			msm_cam_sensor_handle_reg_gpio(power_setting->seq_type,
 				gpio_num_info, GPIOF_OUT_INIT_LOW);
 
+			break;
+		case SENSOR_LDO1:
+		case SENSOR_LDO2:
+		case SENSOR_LDO3:
+		case SENSOR_LDO4:
+		case SENSOR_LDO5:
+		case SENSOR_LDO6:
+		case SENSOR_LDO7:
+		case SENSOR_LDO1P1:
+			cam_ldo_camera_power_down(power_setting->seq_type -
+				SENSOR_LDO1);
 			break;
 		default:
 			CAM_ERR(CAM_SENSOR_UTIL, "error power seq type %d",
@@ -2581,6 +2610,21 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 			if (ret < 0)
 				CAM_ERR(CAM_SENSOR_UTIL,
 					"Error disabling VREG GPIO");
+			break;
+		case SENSOR_LDO1:
+		case SENSOR_LDO2:
+		case SENSOR_LDO3:
+		case SENSOR_LDO4:
+		case SENSOR_LDO5:
+		case SENSOR_LDO6:
+		case SENSOR_LDO7:
+		case SENSOR_LDO1P1:
+			ret = cam_ldo_camera_power_down(pd->seq_type -
+				SENSOR_LDO1);
+			if (ret < 0)
+				CAM_ERR(CAM_SENSOR_UTIL,
+					"camera_power_down iotype [%d] failed",
+					pd->seq_type);
 			break;
 		default:
 			CAM_ERR(CAM_SENSOR_UTIL, "error power seq type %d",
