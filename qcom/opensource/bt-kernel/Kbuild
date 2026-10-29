@@ -1,3 +1,7 @@
+ifeq ($(CONFIG_ARCH_LAPIS),y)
+export CONFIG_I2C_RTC6226_QCA=m
+endif
+
 ifeq ($(CONFIG_MSM_BT_POWER),m)
 KBUILD_CPPFLAGS += -DCONFIG_MSM_BT_POWER
 endif
