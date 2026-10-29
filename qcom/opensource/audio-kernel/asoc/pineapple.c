@@ -18,6 +18,9 @@
 #if IS_ENABLED(CONFIG_QCOM_WCD_USBSS_I2C)
 #include <linux/soc/qcom/wcd939x-i2c.h>
 #endif
+#if IS_ENABLED(CONFIG_QCOM_FSA4480_I2C) || IS_ENABLED(CONFIG_QCOM_FSA4480_SUB_I2C)
+#include <linux/soc/qcom/fsa4480-i2c.h>
+#endif
 #include <linux/pm_qos.h>
 #include <linux/nvmem-consumer.h>
 #include <sound/control.h>
@@ -96,6 +99,12 @@ struct msm_asoc_mach_data {
 	bool is_afe_config_done;
 	struct device_node *fsa_handle;
 	struct device_node *wcd_usbss_handle;
+#if IS_ENABLED(CONFIG_QCOM_FSA4480_I2C)
+	struct device_node *fsa4480_handle;
+#endif
+#if IS_ENABLED(CONFIG_QCOM_FSA4480_SUB_I2C)
+	struct device_node *fsa4480_sub_handle;
+#endif
 	struct clk *lpass_audio_hw_vote;
 	int core_audio_vote_count;
 	u32 wsa_max_devs;
@@ -147,7 +156,7 @@ static struct wcd_mbhc_config wcd_mbhc_cfg = {
 	.key_code[5] = 0,
 	.key_code[6] = 0,
 	.key_code[7] = 0,
-	.linein_th = 5000,
+	.linein_th = 0x0FFFFFFE,
 	.moisture_en = false,
 	.mbhc_micbias = MIC_BIAS_2,
 	.anc_micbias = MIC_BIAS_2,
@@ -1320,7 +1329,7 @@ static struct snd_soc_dai_link msm_tdm_dai_links[] = {
 		.ops = &msm_common_be_ops,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
-		SND_SOC_DAILINK_REG(sec_tdm_rx_0),
+		SND_SOC_DAILINK_REG(sec_tdm_rx_smartpa),
 	},
 	{
 		.name = LPASS_BE_SEC_TDM_TX_0,
@@ -1330,7 +1339,7 @@ static struct snd_soc_dai_link msm_tdm_dai_links[] = {
 			SND_SOC_DPCM_TRIGGER_POST},
 		.ops = &msm_common_be_ops,
 		.ignore_suspend = 1,
-		SND_SOC_DAILINK_REG(sec_tdm_tx_0),
+		SND_SOC_DAILINK_REG(sec_tdm_tx_smartpa),
 	},
 	{
 		.name = LPASS_BE_TERT_TDM_RX_0,
@@ -2725,6 +2734,22 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 	if (!pdata->wcd_usbss_handle)
 		dev_dbg(&pdev->dev, "property %s not detected in node %s\n",
 			"wcd939x-i2c-handle", pdev->dev.of_node->full_name);
+
+#if IS_ENABLED(CONFIG_QCOM_FSA4480_I2C)
+	pdata->fsa4480_handle = of_parse_phandle(pdev->dev.of_node,
+					"fsa4480-i2c-handle", 0);
+	if (!pdata->fsa4480_handle)
+		dev_dbg(&pdev->dev, "property %s not detected in node %s\n",
+			"fsa4480-i2c-handle", pdev->dev.of_node->full_name);
+#endif
+
+#if IS_ENABLED(CONFIG_QCOM_FSA4480_SUB_I2C)
+	pdata->fsa4480_sub_handle = of_parse_phandle(pdev->dev.of_node,
+					"fsa4480-sub-i2c-handle", 0);
+	if (!pdata->fsa4480_sub_handle)
+		dev_dbg(&pdev->dev, "property %s not detected in node %s\n",
+			"fsa4480-sub-i2c-handle", pdev->dev.of_node->full_name);
+#endif
 
 	pdata->dmic01_gpio_p = of_parse_phandle(pdev->dev.of_node,
 					      "qcom,cdc-dmic01-gpios",

@@ -362,6 +362,42 @@ SND_SOC_DAILINK_DEFS(sec_tdm_tx_0,
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-tx")),
 	DAILINK_COMP_ARRAY(COMP_PLATFORM("snd-soc-dummy")));
 
+/* Lapis & kirby dailink config start */
+SND_SOC_DAILINK_DEFS(sec_tdm_rx_smartpa,
+	DAILINK_COMP_ARRAY(COMP_CPU("snd-soc-dummy-dai")),
+	DAILINK_COMP_ARRAY(
+#ifdef BUILD_LAPIS_AUDIO
+		COMP_CODEC("aw882xx_smartpa_0",  "aw882xx-aif-0"),
+		COMP_CODEC("aw882xx_smartpa_1",  "aw882xx-aif-1"),
+		COMP_CODEC("aw882xx_smartpa_2",  "aw882xx-aif-2"),
+		COMP_CODEC("aw882xx_smartpa_3",  "aw882xx-aif-3"),
+		COMP_CODEC("aw882xx_smartpa_4",  "aw882xx-aif-4"),
+		COMP_CODEC("aw882xx_smartpa_5",  "aw882xx-aif-5")
+#else
+		COMP_CODEC("aw882xx_smartpa_0",  "aw882xx-aif-0"),
+		COMP_CODEC("aw882xx_smartpa_1",  "aw882xx-aif-1")
+#endif
+	),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("snd-soc-dummy")));
+
+SND_SOC_DAILINK_DEFS(sec_tdm_tx_smartpa,
+	DAILINK_COMP_ARRAY(COMP_CPU("snd-soc-dummy-dai")),
+	DAILINK_COMP_ARRAY(
+#ifdef BUILD_LAPIS_AUDIO
+		COMP_CODEC("aw882xx_smartpa_0",  "aw882xx-aif-0"),
+		COMP_CODEC("aw882xx_smartpa_1",  "aw882xx-aif-1"),
+		COMP_CODEC("aw882xx_smartpa_2",  "aw882xx-aif-2"),
+		COMP_CODEC("aw882xx_smartpa_3",  "aw882xx-aif-3"),
+		COMP_CODEC("aw882xx_smartpa_4",  "aw882xx-aif-4"),
+		COMP_CODEC("aw882xx_smartpa_5",  "aw882xx-aif-5")
+#else
+		COMP_CODEC("aw882xx_smartpa_0",  "aw882xx-aif-0"),
+		COMP_CODEC("aw882xx_smartpa_1",  "aw882xx-aif-1")
+#endif
+	),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("snd-soc-dummy")));
+/* Lapis & kirby dailink config end */
+
 SND_SOC_DAILINK_DEFS(tert_tdm_rx_0,
 	DAILINK_COMP_ARRAY(COMP_CPU("snd-soc-dummy-dai")),
 	DAILINK_COMP_ARRAY(COMP_CODEC("msm-stub-codec.1", "msm-stub-rx")),

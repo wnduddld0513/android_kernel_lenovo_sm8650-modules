@@ -3,6 +3,7 @@
  * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
+#define DEBUG
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -1524,6 +1525,7 @@ static void wcd939x_wcd_mbhc_calc_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 	wcd939x_mbhc_zdet_ramp(component, zdet_param_ptr, &z1L, NULL, d1);
 	if ((z1L == WCD939X_ZDET_FLOATING_IMPEDANCE) || (z1L > WCD939X_ZDET_VAL_100K)) {
 		*zl = WCD939X_ZDET_FLOATING_IMPEDANCE;
+		dev_dbg(component->dev, "%s: impedance zl = %d(mohms)\n", __func__, *zl);
 	} else {
 		*zl = z1L;
 		wcd939x_wcd_mbhc_qfuse_cal(component, zl, 0);
@@ -1547,6 +1549,7 @@ static void wcd939x_wcd_mbhc_calc_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 	wcd939x_mbhc_zdet_ramp(component, zdet_param_ptr, NULL, &z1R, d1);
 	if ((z1R == WCD939X_ZDET_FLOATING_IMPEDANCE) || (z1R > WCD939X_ZDET_VAL_100K)) {
 		*zr = WCD939X_ZDET_FLOATING_IMPEDANCE;
+		dev_dbg(component->dev, "%s: impedance zr = %d(mohms)\n", __func__, *zr);
 	} else {
 		*zr = z1R;
 		wcd939x_wcd_mbhc_qfuse_cal(component, zr, 4);
