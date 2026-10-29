@@ -6,6 +6,12 @@
 #ifndef __UAPI_MSM_SDE_ROTATOR_H__
 #define __UAPI_MSM_SDE_ROTATOR_H__
 
+#ifndef __KERNEL__
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 199309L
+#endif
+#include <time.h>
+#endif
 #include <linux/videodev2.h>
 #include <linux/types.h>
 #include <linux/ioctl.h>
