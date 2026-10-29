@@ -615,6 +615,7 @@ struct sde_connector {
 	spinlock_t event_lock;
 
 	struct backlight_device *bl_device;
+	u8 hbm_level;
 	struct sde_cdev *cdev;
 	struct notifier_block n;
 	unsigned long thermal_max_brightness;

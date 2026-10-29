@@ -23,6 +23,9 @@
 #include "sde_hw_catalog.h"
 #include <drm/drm_probe_helper.h>
 #include <linux/version.h>
+#if IS_ENABLED(CONFIG_LENOVO_BL_BOOSTER)
+#include <linux/lenovo-bl-booster.h>
+#endif
 
 #define BL_NODE_NAME_SIZE 32
 #define HDR10_PLUS_VSIF_TYPE_CODE      0x81
@@ -142,7 +145,7 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 	}
 
 	brightness = bd->props.brightness;
-	hbm = bd->props.hbm;
+	hbm = c_conn->hbm_level;
 
 	if ((bd->props.power != FB_BLANK_UNBLANK) ||
 			(bd->props.state & BL_CORE_FBBLANK) ||
@@ -226,6 +229,38 @@ static int sde_backlight_cooling_cb(struct notifier_block *nb,
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_LENOVO_BL_BOOSTER)
+static ssize_t hbm_show(struct device *dev, struct device_attribute *attr,
+			char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", lcd_kit_get_hbm_level());
+}
+
+static ssize_t hbm_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct backlight_device *bd = to_backlight_device(dev);
+	struct sde_connector *c_conn = bl_get_data(bd);
+	unsigned long level;
+	int rc;
+
+	rc = kstrtoul(buf, 0, &level);
+	if (rc)
+		return rc;
+	if (level > U8_MAX)
+		return -EINVAL;
+
+	SDE_DEBUG("hbm_mode: %lu, count: %zu\n", level, count);
+	rc = lcd_kit_set_hbm_level(level);
+	if (rc < 0)
+		return rc;
+	c_conn->hbm_level = level;
+
+	return count;
+}
+static DEVICE_ATTR_RW(hbm);
+#endif
+
 static int sde_backlight_setup(struct sde_connector *c_conn,
 					struct drm_device *dev)
 {
@@ -256,7 +291,6 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 	props.power = FB_BLANK_UNBLANK;
 	props.max_brightness = bl_config->brightness_max_level;
 	props.brightness = bl_config->brightness_max_level;
-	props.hbm = 0;
 	snprintf(bl_node_name, BL_NODE_NAME_SIZE, "panel%u-backlight",
 							display_count);
 	c_conn->bl_device = backlight_device_register(bl_node_name, dev->dev, c_conn,
@@ -268,6 +302,10 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 		return -ENODEV;
 	}
 	c_conn->thermal_max_brightness = bl_config->brightness_max_level;
+#if IS_ENABLED(CONFIG_LENOVO_BL_BOOSTER)
+	if (device_create_file(&c_conn->bl_device->dev, &dev_attr_hbm))
+		SDE_ERROR("Failed to create hbm_mode node\n");
+#endif
 
 	/**
 	 * In TVM, thermal cooling device is not enabled. Registering with dummy
