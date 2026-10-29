@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -246,7 +246,6 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 	uintptr_t generic_ptr;
 	struct cam_control *ioctl_ctrl = NULL;
 	struct cam_packet *csl_packet = NULL;
-	struct cam_packet *csl_packet_u = NULL;
 	struct cam_cmd_buf_desc *cmd_desc = NULL;
 	struct cam_buf_io_cfg *io_cfg = NULL;
 	struct i2c_settings_array *i2c_reg_settings = NULL;
@@ -287,16 +286,18 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 			"Inval cam_packet strut size: %zu, len_of_buff: %zu",
 			 sizeof(struct cam_packet), len_of_buff);
 		rc = -EINVAL;
-		goto put_ref;
+		goto end;
 	}
 
 	remain_len -= (size_t)config.offset;
-	csl_packet_u = (struct cam_packet *)(generic_ptr +
+	csl_packet = (struct cam_packet *)(generic_ptr +
 		(uint32_t)config.offset);
-	rc = cam_packet_util_copy_pkt_to_kmd(csl_packet_u, &csl_packet, remain_len);
-	if (rc) {
-		CAM_ERR(CAM_SENSOR, "Copying packet to KMD failed");
-		goto put_ref;
+
+	if (cam_packet_util_validate_packet(csl_packet,
+		remain_len)) {
+		CAM_ERR(CAM_SENSOR, "Invalid packet params");
+		rc = -EINVAL;
+		goto end;
 	}
 
 	if ((csl_packet->header.op_code & 0xFFFFFF) !=
@@ -314,16 +315,6 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 
 	if (csl_packet->header.request_id > s_ctrl->last_flush_req)
 		s_ctrl->last_flush_req = 0;
-
-	if ((int64_t)csl_packet->header.request_id < 0) {
-		CAM_ERR(CAM_SENSOR,
-			"Invalid request_id: %lld for opcode: 0x%x on %s, rejecting packet",
-			(int64_t)csl_packet->header.request_id,
-			csl_packet->header.op_code & 0xFFFFFF,
-			s_ctrl->sensor_name);
-		rc = -EINVAL;
-		goto end;
-	}
 
 	prev_updated_req = s_ctrl->last_updated_req;
 	s_ctrl->is_res_info_updated = false;
@@ -569,8 +560,6 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 	}
 
 end:
-	cam_common_mem_free(csl_packet);
-put_ref:
 	cam_mem_put_cpu_buf(config.packet_handle);
 	return rc;
 }
@@ -826,7 +815,6 @@ int32_t cam_handle_mem_ptr(uint64_t handle, uint32_t cmd,
 	void *ptr;
 	size_t len;
 	struct cam_packet *pkt = NULL;
-	struct cam_packet *pkt_u = NULL;
 	struct cam_cmd_buf_desc *cmd_desc = NULL;
 	uintptr_t cmd_buf1 = 0;
 	uintptr_t packet = 0;
@@ -840,17 +828,11 @@ int32_t cam_handle_mem_ptr(uint64_t handle, uint32_t cmd,
 		return -EINVAL;
 	}
 
-	pkt_u = (struct cam_packet *)packet;
-	if (pkt_u == NULL) {
+	pkt = (struct cam_packet *)packet;
+	if (pkt == NULL) {
 		CAM_ERR(CAM_SENSOR, "packet pos is invalid");
 		rc = -EINVAL;
-		goto put_ref;
-	}
-
-	rc = cam_packet_util_copy_pkt_to_kmd(pkt_u, &pkt, len);
-	if (rc) {
-		CAM_ERR(CAM_SENSOR, "Copying packet to KMD failed");
-		goto put_ref;
+		goto end;
 	}
 
 	if ((len < sizeof(struct cam_packet)) ||
@@ -917,8 +899,6 @@ int32_t cam_handle_mem_ptr(uint64_t handle, uint32_t cmd,
 	}
 
 end:
-	cam_common_mem_free(pkt);
-put_ref:
 	cam_mem_put_cpu_buf(handle);
 	return rc;
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/uaccess.h>
@@ -56,20 +56,8 @@ static int cam_jpeg_insert_cdm_change_base(
 	struct cam_jpeg_hw_ctx_data *ctx_data,
 	struct cam_jpeg_hw_mgr *hw_mgr);
 
-static inline void cam_jpeg_mgr_move_req_to_free_list(struct cam_jpeg_hw_cfg_req *p_cfg_req)
-{
-	if (!p_cfg_req) {
-		CAM_ERR(CAM_JPEG, "Invalid args");
-		return;
-	}
-
-	cam_mem_put_cpu_buf(p_cfg_req->hw_cfg_args.hw_update_entries[0].handle);
-	list_add_tail(&p_cfg_req->list, &g_jpeg_hw_mgr.free_req_list);
-}
-
 static void cam_jpeg_mgr_apply_evt_injection(struct cam_hw_done_event_data *buf_done_data,
 	struct cam_jpeg_hw_ctx_data *ctx_data, bool *signal_fence_buffer)
-
 {
 	struct cam_hw_inject_evt_param *evt_inject_params = &ctx_data->evt_inject_params;
 	struct cam_common_evt_inject_data inject_evt;
@@ -242,11 +230,6 @@ static int cam_jpeg_process_next_hw_update(void *priv, void *data,
 	}
 
 	ctx_data = (struct cam_jpeg_hw_ctx_data *)data;
-	if (!ctx_data->cdm_cmd) {
-		CAM_ERR(CAM_JPEG, "Invalid ctx_data->cdm_cmd");
-		return -EINVAL;
-	}
-
 	dev_type = ctx_data->jpeg_dev_acquire_info.dev_type;
 	p_cfg_req = hw_mgr->dev_hw_cfg_args[dev_type][0];
 	config_args = (struct cam_hw_config_args *)&p_cfg_req->hw_cfg_args;
@@ -593,7 +576,7 @@ exit:
 		goto err;
 	}
 
-	cam_jpeg_mgr_move_req_to_free_list(p_cfg_req);
+	list_add_tail(&p_cfg_req->list, &g_jpeg_hw_mgr.free_req_list);
 err:
 	mutex_unlock(&g_jpeg_hw_mgr.hw_mgr_mutex);
 	return rc;
@@ -693,8 +676,8 @@ static int cam_jpeg_insert_cdm_change_base(
 		return rc;
 	}
 
-	if ((config_args->hw_update_entries[CAM_JPEG_CHBASE_CMD_BUFF_IDX].offset +
-		(2 * sizeof(uint32_t))) >= ch_base_len) {
+	if (config_args->hw_update_entries[CAM_JPEG_CHBASE_CMD_BUFF_IDX].offset >=
+		ch_base_len) {
 		CAM_ERR(CAM_JPEG, "Not enough buf offset %d len %d",
 			config_args->hw_update_entries[CAM_JPEG_CHBASE_CMD_BUFF_IDX].offset,
 			ch_base_len);
@@ -802,6 +785,7 @@ static int cam_jpeg_mgr_process_hw_update_entries(void *priv, void *data)
 
 	if (!config_args->num_hw_update_entries) {
 		CAM_ERR(CAM_JPEG, "No hw update enteries are available");
+		mutex_unlock(&hw_mgr->hw_mgr_mutex);
 		rc = -EINVAL;
 		goto end_unusedev;
 	}
@@ -809,6 +793,7 @@ static int cam_jpeg_mgr_process_hw_update_entries(void *priv, void *data)
 	ctx_data = (struct cam_jpeg_hw_ctx_data *)config_args->ctxt_to_hw_map;
 	if (!ctx_data->in_use) {
 		CAM_ERR(CAM_JPEG, "ctx is not in use");
+		mutex_unlock(&hw_mgr->hw_mgr_mutex);
 		rc = -EINVAL;
 		goto end_unusedev;
 	}
@@ -874,6 +859,7 @@ static int cam_jpeg_mgr_process_hw_update_entries(void *priv, void *data)
 	return rc;
 
 end_callcb:
+	mutex_unlock(&hw_mgr->hw_mgr_mutex);
 	if (p_cfg_req) {
 		buf_data.num_handles =
 			config_args->num_out_map_entries;
@@ -894,6 +880,7 @@ end_callcb:
 		}
 	}
 end_unusedev:
+	mutex_lock(&hw_mgr->hw_mgr_mutex);
 	hw_mgr->device_in_use[p_cfg_req->dev_type][0] = false;
 	hw_mgr->dev_hw_cfg_args[p_cfg_req->dev_type][0] = NULL;
 
@@ -992,7 +979,8 @@ static int cam_jpeg_mgr_config_hw(void *hw_mgr_priv, void *config_hw_args)
 err_after_get_task:
 	list_del_init(&p_cfg_req->list);
 err_after_dq_free_list:
-	cam_jpeg_mgr_move_req_to_free_list(p_cfg_req);
+	list_add_tail(&p_cfg_req->list, &hw_mgr->free_req_list);
+
 	return rc;
 }
 
@@ -1175,7 +1163,6 @@ static int cam_jpeg_mgr_flush(void *hw_mgr_priv,
 	dev_type = ctx_data->jpeg_dev_acquire_info.dev_type;
 
 	p_cfg_req = hw_mgr->dev_hw_cfg_args[dev_type][0];
-
 	if (hw_mgr->device_in_use[dev_type][0] == true &&
 		p_cfg_req != NULL) {
 		if ((struct cam_jpeg_hw_ctx_data *)
@@ -1183,7 +1170,8 @@ static int cam_jpeg_mgr_flush(void *hw_mgr_priv,
 			cam_jpeg_mgr_stop_deinit_dev(hw_mgr, p_cfg_req,
 				dev_type);
 			list_del_init(&p_cfg_req->list);
-			cam_jpeg_mgr_move_req_to_free_list(p_cfg_req);
+			list_add_tail(&p_cfg_req->list,
+				&hw_mgr->free_req_list);
 		}
 	}
 
@@ -1194,7 +1182,7 @@ static int cam_jpeg_mgr_flush(void *hw_mgr_priv,
 			continue;
 
 		list_del_init(&cfg_req->list);
-		cam_jpeg_mgr_move_req_to_free_list(cfg_req);
+		list_add_tail(&cfg_req->list, &hw_mgr->free_req_list);
 	}
 
 	CAM_DBG(CAM_JPEG, "X: JPEG flush ctx");
@@ -1252,7 +1240,8 @@ static int cam_jpeg_mgr_flush_req(void *hw_mgr_priv,
 			cam_jpeg_mgr_stop_deinit_dev(hw_mgr, p_cfg_req,
 				dev_type);
 			list_del_init(&p_cfg_req->list);
-			cam_jpeg_mgr_move_req_to_free_list(p_cfg_req);
+			list_add_tail(&p_cfg_req->list,
+				&hw_mgr->free_req_list);
 			b_req_found = true;
 		}
 	}
@@ -1267,7 +1256,7 @@ static int cam_jpeg_mgr_flush_req(void *hw_mgr_priv,
 			continue;
 
 		list_del_init(&cfg_req->list);
-		cam_jpeg_mgr_move_req_to_free_list(cfg_req);
+		list_add_tail(&cfg_req->list, &hw_mgr->free_req_list);
 		b_req_found = true;
 		break;
 	}
@@ -1399,6 +1388,7 @@ static int cam_jpeg_mgr_release_hw(void *hw_mgr_priv, void *release_hw_args)
 		cam_cdm_release(hw_mgr->cdm_info[dev_type][0].cdm_handle);
 	}
 
+	mutex_unlock(&hw_mgr->hw_mgr_mutex);
 
 	rc = cam_jpeg_mgr_release_ctx(hw_mgr, ctx_data);
 	if (rc) {
@@ -1413,7 +1403,6 @@ static int cam_jpeg_mgr_release_hw(void *hw_mgr_priv, void *release_hw_args)
 	kfree(ctx_data->cdm_cmd);
 	ctx_data->cdm_cmd = NULL;
 	CAM_DBG(CAM_JPEG, "handle %llu", ctx_data);
-	mutex_unlock(&hw_mgr->hw_mgr_mutex);
 
 	return rc;
 }
@@ -1958,10 +1947,10 @@ hw_dump:
 			&jpeg_dump_args, sizeof(jpeg_dump_args));
 	}
 
+	mutex_unlock(&hw_mgr->hw_mgr_mutex);
 	CAM_DBG(CAM_JPEG, "Offset before %u after %u",
 		dump_args->offset, jpeg_dump_args.offset);
 	dump_args->offset = jpeg_dump_args.offset;
-	mutex_unlock(&hw_mgr->hw_mgr_mutex);
 	cam_mem_put_cpu_buf(dump_args->buf_handle);
 	return rc;
 }
