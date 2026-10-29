@@ -72,4 +72,5 @@ static inline void dp_usbpd_put(struct dp_hpd *pd)
 {
 }
 #endif /* CONFIG_DRM_MSM_DP_USBPD_LEGACY */
+void dp_debug_reset_override(void);
 #endif /* _DP_USBPD_H_ */

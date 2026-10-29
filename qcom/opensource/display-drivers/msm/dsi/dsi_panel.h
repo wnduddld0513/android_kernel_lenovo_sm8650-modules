@@ -169,6 +169,10 @@ struct dsi_panel_reset_config {
 	int reset_gpio;
 	int disp_en_gpio;
 	int lcd_mode_sel_gpio;
+	int disp_enn_gpio;
+	int disp_enp_gpio;
+	int disp_blen_gpio;
+	int disp_iovdd_gpio;
 	u32 mode_sel_state;
 };
 
@@ -386,7 +390,7 @@ int dsi_panel_unprepare(struct dsi_panel *panel);
 
 int dsi_panel_post_unprepare(struct dsi_panel *panel);
 
-int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl);
+int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl, u8 hbm);
 
 int dsi_panel_update_pps(struct dsi_panel *panel);
 
@@ -439,4 +443,9 @@ int dsi_panel_create_cmd_packets(const char *data, u32 length, u32 count,
 void dsi_panel_destroy_cmd_packets(struct dsi_panel_cmd_set *set);
 
 void dsi_panel_dealloc_cmd_packets(struct dsi_panel_cmd_set *set);
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+int dsi_panel_match_fps_pen_setting(struct dsi_panel *panel, struct dsi_display_mode *adj_mode, int stages);
+#elif IS_ENABLED(CONFIG_ARCH_LAPIS)
+int dsi_panel_match_fps_setting(struct dsi_panel *panel, struct dsi_display_mode *adj_mode, int stages);
+#endif
 #endif /* _DSI_PANEL_H_ */

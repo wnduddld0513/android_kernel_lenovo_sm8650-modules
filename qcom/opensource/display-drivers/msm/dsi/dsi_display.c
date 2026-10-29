@@ -23,6 +23,7 @@
 #include "dsi_pwr.h"
 #include "sde_dbg.h"
 #include "dsi_parser.h"
+#include <linux/hqsysfs.h>
 
 #define to_dsi_display(x) container_of(x, struct dsi_display, host)
 #define INT_BASE_10 10
@@ -38,7 +39,7 @@
 #define MAX_TE_SOURCE_ID  2
 
 #define SEC_PANEL_NAME_MAX_LEN  256
-
+int lcm_panel_id = 0;
 u8 dbgfs_tx_cmd_buf[SZ_4K];
 static char dsi_display_primary[MAX_CMDLINE_PARAM_LEN];
 static char dsi_display_secondary[MAX_CMDLINE_PARAM_LEN];
@@ -227,7 +228,7 @@ void dsi_rect_intersect(const struct dsi_rect *r1,
 }
 
 int dsi_display_set_backlight(struct drm_connector *connector,
-		void *display, u32 bl_lvl)
+		void *display, u32 bl_lvl, u8 hbm)
 {
 	struct dsi_display *dsi_display = display;
 	struct dsi_panel *panel;
@@ -272,7 +273,7 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 	DSI_DEBUG("bl_scale = %u, bl_scale_sv = %u, bl_lvl = %u\n",
 		bl_scale, bl_scale_sv, (u32)bl_temp);
 
-	rc = dsi_panel_set_backlight(panel, (u32)bl_temp);
+	rc = dsi_panel_set_backlight(panel, (u32)bl_temp, hbm);
 	if (rc)
 		DSI_ERR("unable to set backlight\n");
 
@@ -483,7 +484,7 @@ static void dsi_display_register_te_irq(struct dsi_display *display)
 	irq_set_status_flags(te_irq, IRQ_DISABLE_UNLAZY);
 
 	rc = devm_request_irq(dev, te_irq, dsi_display_panel_te_irq_handler,
-			      IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+			      IRQF_TRIGGER_RISING | IRQF_ONESHOT,
 			      "TE_GPIO", display);
 	if (rc) {
 		DSI_ERR("TE request_irq failed for ESD rc:%d\n", rc);
@@ -950,6 +951,31 @@ void dsi_display_toggle_error_interrupt_status(struct dsi_display * display, boo
 	}
 }
 
+static int dsi_display_status_te_check(struct dsi_display *display)
+{
+	struct dsi_display *dsi_display = display;
+	struct dsi_panel *panel;
+	int rc = 1;
+	int te_state = 0;
+
+         if (!dsi_display || !dsi_display->panel)
+		return -EINVAL;
+
+	panel = dsi_display->panel;
+
+	if (gpio_is_valid(dsi_display->disp_te_gpio)) {
+		gpio_direction_input(dsi_display->disp_te_gpio);
+
+		te_state = gpio_get_value(dsi_display->disp_te_gpio);
+		if (te_state) {
+			DSI_ERR("TE check failed\n");
+			rc = -EINVAL;
+		}
+	}
+
+	return rc;
+}
+
 int dsi_display_check_status(struct drm_connector *connector, void *display,
 					bool te_check_override)
 {
@@ -995,6 +1021,11 @@ int dsi_display_check_status(struct drm_connector *connector, void *display,
 
 	dsi_display_set_ctrl_esd_check_flag(dsi_display, true);
 
+	if (status_mode == ESD_MODE_PANEL_TE) {
+		rc = dsi_display_status_te_check(dsi_display);
+		goto exit;
+	}
+
 	dsi_display_clk_ctrl(dsi_display->dsi_clk_handle, DSI_ALL_CLKS, DSI_CLK_ON);
 
 	/* Disable error interrupts while doing an ESD check */
@@ -1021,14 +1052,16 @@ int dsi_display_check_status(struct drm_connector *connector, void *display,
 					te_rechecks);
 	}
 
+	dsi_display_clk_ctrl(dsi_display->dsi_clk_handle, DSI_ALL_CLKS, DSI_CLK_OFF);
+
 	/* Handle Panel failures during display disable sequence */
+exit:
 	if (rc <=0)
 		atomic_set(&panel->esd_recovery_pending, 1);
 	else
 		/* Enable error interrupts post an ESD success */
 		dsi_display_toggle_error_interrupt_status(dsi_display, true);
 
-	dsi_display_clk_ctrl(dsi_display->dsi_clk_handle, DSI_ALL_CLKS, DSI_CLK_OFF);
 release_panel_lock:
 	dsi_panel_release_panel_lock(panel);
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT, rc);
@@ -5065,39 +5098,144 @@ static int dsi_display_get_dfps_timing(struct dsi_display *display,
 	/* TODO: Remove this direct reference to the dsi_ctrl */
 	timing = &per_ctrl_mode.timing;
 
-	switch (dfps_caps.type) {
-	case DSI_DFPS_IMMEDIATE_VFP:
-		rc = dsi_display_dfps_calc_front_porch(
-				curr_refresh_rate,
-				timing->refresh_rate,
-				dsi_h_total_dce(timing),
-				DSI_V_TOTAL(timing),
-				timing->v_front_porch,
-				&adj_mode->timing.v_front_porch);
-		SDE_EVT32(SDE_EVTLOG_FUNC_CASE1, DSI_DFPS_IMMEDIATE_VFP,
-			curr_refresh_rate, timing->refresh_rate,
-			timing->v_front_porch, adj_mode->timing.v_front_porch);
-		break;
+	DSI_INFO("the current refresh rate is %d\n", timing->refresh_rate);
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+	if (timing->refresh_rate == 165) {
+		adj_mode->timing.v_front_porch = 30;
+		adj_mode->timing.h_front_porch = 70;
+	} else if (timing->refresh_rate == 144) {
+		adj_mode->timing.v_front_porch = 30;
+		adj_mode->timing.h_front_porch = 178;
+	} else if (timing->refresh_rate == 90) {
+		adj_mode->timing.v_front_porch = 1740;
+		adj_mode->timing.h_front_porch = 178;
+	} else if (timing->refresh_rate == 120) {
+		adj_mode->timing.v_front_porch = 30;
+		adj_mode->timing.h_front_porch = 350;
+	} else if (timing->refresh_rate == 60) {
+		adj_mode->timing.v_front_porch = 2880;
+		adj_mode->timing.h_front_porch = 350;
+	} else if (timing->refresh_rate == 30) {
+		adj_mode->timing.v_front_porch = 8580;
+		adj_mode->timing.h_front_porch = 350;
+	} else {
+		switch (dfps_caps.type) {
+		case DSI_DFPS_IMMEDIATE_VFP:
+			DSI_INFO("dfps_caps.type is %d\n", dfps_caps.type);
+			rc = dsi_display_dfps_calc_front_porch(
+					curr_refresh_rate,
+					timing->refresh_rate,
+					dsi_h_total_dce(timing),
+					DSI_V_TOTAL(timing),
+					timing->v_front_porch,
+					&adj_mode->timing.v_front_porch);
+			SDE_EVT32(SDE_EVTLOG_FUNC_CASE1, DSI_DFPS_IMMEDIATE_VFP,
+				curr_refresh_rate, timing->refresh_rate,
+				timing->v_front_porch, adj_mode->timing.v_front_porch);
+			break;
 
-	case DSI_DFPS_IMMEDIATE_HFP:
-		rc = dsi_display_dfps_calc_front_porch(
-				curr_refresh_rate,
-				timing->refresh_rate,
-				DSI_V_TOTAL(timing),
-				dsi_h_total_dce(timing),
-				timing->h_front_porch,
-				&adj_mode->timing.h_front_porch);
-		SDE_EVT32(SDE_EVTLOG_FUNC_CASE2, DSI_DFPS_IMMEDIATE_HFP,
-			curr_refresh_rate, timing->refresh_rate,
-			timing->h_front_porch, adj_mode->timing.h_front_porch);
-		if (!rc)
-			adj_mode->timing.h_front_porch *= display->ctrl_count;
-		break;
+		case DSI_DFPS_IMMEDIATE_HFP:
+			DSI_INFO("dfps_caps.type is %d\n", dfps_caps.type);
+			rc = dsi_display_dfps_calc_front_porch(
+					curr_refresh_rate,
+					timing->refresh_rate,
+					DSI_V_TOTAL(timing),
+					dsi_h_total_dce(timing),
+					timing->h_front_porch,
+					&adj_mode->timing.h_front_porch);
+			SDE_EVT32(SDE_EVTLOG_FUNC_CASE2, DSI_DFPS_IMMEDIATE_HFP,
+				curr_refresh_rate, timing->refresh_rate,
+				timing->h_front_porch, adj_mode->timing.h_front_porch);
+			if (!rc)
+				adj_mode->timing.h_front_porch *= display->ctrl_count;
+			break;
 
-	default:
-		DSI_ERR("Unsupported DFPS mode %d\n", dfps_caps.type);
-		rc = -ENOTSUPP;
+		default:
+			DSI_ERR("Unsupported DFPS mode %d\n", dfps_caps.type);
+			rc = -ENOTSUPP;
+		}
 	}
+#elif IS_ENABLED(CONFIG_ARCH_LAPIS)
+	if (timing->refresh_rate == 144) {
+		adj_mode->timing.v_front_porch = 26;
+		adj_mode->timing.h_front_porch = 74;
+	} else if (timing->refresh_rate == 90) {
+		adj_mode->timing.v_front_porch = 1256;
+		adj_mode->timing.h_front_porch = 74;
+	} else {
+		switch (dfps_caps.type) {
+		case DSI_DFPS_IMMEDIATE_VFP:
+			DSI_INFO("dfps_caps.type is %d\n", dfps_caps.type);
+			rc = dsi_display_dfps_calc_front_porch(
+					curr_refresh_rate,
+					timing->refresh_rate,
+					dsi_h_total_dce(timing),
+					DSI_V_TOTAL(timing),
+					timing->v_front_porch,
+					&adj_mode->timing.v_front_porch);
+			SDE_EVT32(SDE_EVTLOG_FUNC_CASE1, DSI_DFPS_IMMEDIATE_VFP,
+				curr_refresh_rate, timing->refresh_rate,
+				timing->v_front_porch, adj_mode->timing.v_front_porch);
+			break;
+
+		case DSI_DFPS_IMMEDIATE_HFP:
+			DSI_INFO("dfps_caps.type is %d\n", dfps_caps.type);
+			rc = dsi_display_dfps_calc_front_porch(
+					curr_refresh_rate,
+					timing->refresh_rate,
+					DSI_V_TOTAL(timing),
+					dsi_h_total_dce(timing),
+					timing->h_front_porch,
+					&adj_mode->timing.h_front_porch);
+			SDE_EVT32(SDE_EVTLOG_FUNC_CASE2, DSI_DFPS_IMMEDIATE_HFP,
+				curr_refresh_rate, timing->refresh_rate,
+				timing->h_front_porch, adj_mode->timing.h_front_porch);
+			if (!rc)
+				adj_mode->timing.h_front_porch *= display->ctrl_count;
+			break;
+
+		default:
+			DSI_ERR("Unsupported DFPS mode %d\n", dfps_caps.type);
+			rc = -ENOTSUPP;
+		}
+	}
+#else
+	switch (dfps_caps.type) {
+		case DSI_DFPS_IMMEDIATE_VFP:
+			DSI_INFO("dfps_caps.type is %d\n", dfps_caps.type);
+			rc = dsi_display_dfps_calc_front_porch(
+					curr_refresh_rate,
+					timing->refresh_rate,
+					dsi_h_total_dce(timing),
+					DSI_V_TOTAL(timing),
+					timing->v_front_porch,
+					&adj_mode->timing.v_front_porch);
+			SDE_EVT32(SDE_EVTLOG_FUNC_CASE1, DSI_DFPS_IMMEDIATE_VFP,
+				curr_refresh_rate, timing->refresh_rate,
+				timing->v_front_porch, adj_mode->timing.v_front_porch);
+			break;
+
+		case DSI_DFPS_IMMEDIATE_HFP:
+			DSI_INFO("dfps_caps.type is %d\n", dfps_caps.type);
+			rc = dsi_display_dfps_calc_front_porch(
+					curr_refresh_rate,
+					timing->refresh_rate,
+					DSI_V_TOTAL(timing),
+					dsi_h_total_dce(timing),
+					timing->h_front_porch,
+					&adj_mode->timing.h_front_porch);
+			SDE_EVT32(SDE_EVTLOG_FUNC_CASE2, DSI_DFPS_IMMEDIATE_HFP,
+				curr_refresh_rate, timing->refresh_rate,
+				timing->h_front_porch, adj_mode->timing.h_front_porch);
+			if (!rc)
+				adj_mode->timing.h_front_porch *= display->ctrl_count;
+			break;
+
+		default:
+			DSI_ERR("Unsupported DFPS mode %d\n", dfps_caps.type);
+			rc = -ENOTSUPP;
+		}
+#endif
 
 	return rc;
 }
@@ -6054,6 +6192,31 @@ static void dsi_display_firmware_display(const struct firmware *fw,
 	DSI_DEBUG("success\n");
 }
 
+void set_panel_id(struct dsi_display_boot_param *boot_disp)
+{
+	if (strstr(boot_disp->name, "dsi_kirby_nt36523_csot_dsc_vid")) {
+		DSI_INFO("panel_name = %s,vendor:CSOT, ic:NT36523N\n", boot_disp->name);
+		lcm_panel_id = 0;
+		hq_register_hw_info(HWID_LCM, "dsi_kirby_nt36523_csot_dsc_vid");
+	} else if (strstr(boot_disp->name, "dsi_kirby_nt36523_boe_dsc_vid")) {
+		DSI_INFO("panel_name = %s,vendor:boe, ic:NT36523N\n", boot_disp->name);
+		lcm_panel_id = 1;
+		hq_register_hw_info(HWID_LCM, "dsi_kirby_nt36523_boe_dsc_vid");
+	} else if (strstr(boot_disp->name, "lapis_tianma_nt36532_dsc_3k_video")) {
+		DSI_INFO("panel_name = %s,vendor:tianma, ic:NT36523N\n", boot_disp->name);
+		lcm_panel_id = 2;
+		hq_register_hw_info(HWID_LCM, "lapis_tianma_nt36532_dsc_3k_video");
+	} else if (strstr(boot_disp->name, "lapis_boe_nt36532_dsc_3k_video")) {
+		DSI_INFO("panel_name = %s,vendor:boe, ic:NT36523N\n", boot_disp->name);
+		lcm_panel_id = 3;
+		hq_register_hw_info(HWID_LCM, "lapis_boe_nt36532_dsc_3k_video");
+	} else  {
+		DSI_INFO("panel_name = %s,vendor:CSOT, ic:NT36523N\n", boot_disp->name);
+		lcm_panel_id = 0;
+		hq_register_hw_info(HWID_LCM, "dsi_kirby_nt36523_csot_dsc_vid");
+	}
+}
+
 int dsi_display_dev_probe(struct platform_device *pdev)
 {
 	struct dsi_display *display = NULL;
@@ -6126,6 +6289,8 @@ int dsi_display_dev_probe(struct platform_device *pdev)
 	display->panel_node = panel_node;
 	display->pdev = pdev;
 	display->boot_disp = boot_disp;
+
+	set_panel_id(boot_disp);
 
 	dsi_display_parse_cmdline_topology(display, index);
 
@@ -7161,6 +7326,7 @@ int dsi_display_get_modes_helper(struct dsi_display *display,
 	u32 num_dfps_rates, mode_idx, sublinks_count, array_idx = 0;
 	bool is_split_link, support_cmd_mode, support_video_mode;
 	struct dsi_host_common_cfg *host = &display->panel->host_config;
+	struct dsi_dfps_capabilities *fps_type = &display->panel->dfps_caps;
 
 	for (mode_idx = 0; mode_idx < timing_mode_count; mode_idx++) {
 		struct dsi_display_mode display_mode;
@@ -7318,6 +7484,12 @@ int dsi_display_get_modes_helper(struct dsi_display *display,
 			if (avr_caps->avr_step_fps_list_len) {
 				sub_mode->timing.avr_step_fps = avr_caps->avr_step_fps_list[i];
 				sub_mode->priv_info->avr_step_fps = sub_mode->timing.avr_step_fps;
+			}
+
+			if (sub_mode->timing.refresh_rate == 144 || sub_mode->timing.refresh_rate == 90 || sub_mode->timing.refresh_rate == 165) {
+				fps_type->type = DSI_DFPS_IMMEDIATE_HFP;
+			} else {
+				fps_type->type = DSI_DFPS_IMMEDIATE_VFP;
 			}
 
 			dsi_display_get_dfps_timing(display, sub_mode,
@@ -7950,13 +8122,18 @@ int dsi_display_set_mode(struct dsi_display *display,
 		goto error;
 	}
 
-	DSI_INFO("mdp_transfer_time=%d, hactive=%d, vactive=%d, fps=%d, clk_rate=%llu\n",
-			adj_mode.priv_info->mdp_transfer_time_us,
-			timing.h_active, timing.v_active, timing.refresh_rate,
-			adj_mode.priv_info->clk_rate_hz);
 	SDE_EVT32(adj_mode.priv_info->mdp_transfer_time_us,
 			timing.h_active, timing.v_active, timing.refresh_rate,
 			adj_mode.priv_info->clk_rate_hz);
+
+	DSI_INFO("mdp_transfer_time=%d, hactive=%d, hbp=%d , hsw=%d, hfp=%d, hskew=%d, vactive=%d, vbp=%d , vsw=%d, vfp=%d, fps=%d, clk_rate=%u,h_total=%d,v_total=%d\n",
+		adj_mode.priv_info->mdp_transfer_time_us,
+		timing.h_active,timing.h_back_porch, timing.h_sync_width,  timing.h_front_porch, timing.h_skew,
+		timing.v_active, timing.v_back_porch, timing.v_sync_width,  timing.v_front_porch,
+		timing.refresh_rate,
+		adj_mode.priv_info->clk_rate_hz,
+		dsi_h_total_dce(&timing),
+		DSI_V_TOTAL(&timing));
 
 	memcpy(display->panel->cur_mode, &adj_mode, sizeof(adj_mode));
 error:

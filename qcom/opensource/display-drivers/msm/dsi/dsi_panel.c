@@ -23,7 +23,13 @@
 #include "sde_dbg.h"
 #include "sde_dsc_helper.h"
 #include "sde_vdc_helper.h"
-
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+#include <linux/aw3750x.h>
+#endif
+#if IS_ENABLED(CONFIG_LENOVO_BL_BOOSTER)
+#include <linux/lenovo-bl-booster.h>
+#endif
+extern bool nvt_gesture_flag;
 /**
  * topology is currently defined by a set of following 3 values:
  * 1. num of layer mixers
@@ -358,7 +364,6 @@ static int dsi_panel_set_pinctrl_state(struct dsi_panel *panel, bool enable)
 	return rc;
 }
 
-
 static int dsi_panel_power_on(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -375,6 +380,37 @@ static int dsi_panel_power_on(struct dsi_panel *panel)
 		DSI_ERR("[%s] failed to set pinctrl, rc=%d\n", panel->name, rc);
 		goto error_disable_vregs;
 	}
+	//iovdd
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+	if (gpio_is_valid(panel->reset_config.disp_iovdd_gpio) ) {
+		gpio_set_value(panel->reset_config.disp_iovdd_gpio, 1);
+		DSI_DEBUG("[%s] xuyn disp_iovdd_gpio   set, rc=%d\n", panel->name,
+			panel->reset_config.disp_iovdd_gpio);
+	}
+
+	//enp
+	if (gpio_is_valid(panel->reset_config.disp_enp_gpio) ) {
+		gpio_set_value(panel->reset_config.disp_enp_gpio, 1);
+		DSI_DEBUG("[%s] disp_enp_gpio   set, rc=%d\n", panel->name,
+			panel->reset_config.disp_enp_gpio);
+	}
+
+	usleep_range(5000,5100);
+
+	//enn
+	if (gpio_is_valid(panel->reset_config.disp_enn_gpio) ) {
+		gpio_set_value(panel->reset_config.disp_enn_gpio, 1);
+		DSI_DEBUG("[%s] disp_enn_gpio  set, rc=%d\n", panel->name,
+			panel->reset_config.disp_enn_gpio);
+	}
+	usleep_range(11*1000,((11*1000)+10));
+#endif
+
+// Below bl-booster section will be skipped in Kirby, as no relevant setting.
+#if IS_ENABLED(CONFIG_LENOVO_BL_BOOSTER)
+    lcd_kit_enable_vsp(true);
+    lcd_kit_enable_vsn(true);
+#endif
 
 	rc = dsi_panel_reset(panel);
 	if (rc) {
@@ -403,13 +439,43 @@ exit:
 static int dsi_panel_power_off(struct dsi_panel *panel)
 {
 	int rc = 0;
-
+if(!nvt_gesture_flag){
 	if (gpio_is_valid(panel->reset_config.disp_en_gpio))
 		gpio_set_value_cansleep(panel->reset_config.disp_en_gpio, 0);
+
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+	if (gpio_is_valid(panel->reset_config.disp_enn_gpio) ) {
+		gpio_set_value(panel->reset_config.disp_enn_gpio, 0);
+		DSI_DEBUG("[%s] disp_enn_gpio  set, rc=%d\n", panel->name,
+			panel->reset_config.disp_enn_gpio);
+	}
+	usleep_range(5000,5100);
+	if (gpio_is_valid(panel->reset_config.disp_enp_gpio) ) {
+		gpio_set_value(panel->reset_config.disp_enp_gpio, 0);
+		DSI_DEBUG("[%s] disp_enp_gpio   set, rc=%d\n", panel->name,
+			panel->reset_config.disp_enp_gpio);
+	}
+#endif
+
+// Below bl-booster section will be skipped in Kirby, as no relevant setting.
+#if IS_ENABLED(CONFIG_LENOVO_BL_BOOSTER)
+    lcd_kit_enable_vsn(false);
+    lcd_kit_enable_vsp(false);
+#endif
 
 	if (gpio_is_valid(panel->reset_config.reset_gpio) &&
 					!panel->reset_gpio_always_on)
 		gpio_set_value_cansleep(panel->reset_config.reset_gpio, 0);
+
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+    //iovdd
+    usleep_range(5000,5100);
+	if (gpio_is_valid(panel->reset_config.disp_iovdd_gpio) ) {
+		gpio_set_value(panel->reset_config.disp_iovdd_gpio, 0);
+		DSI_DEBUG("[%s] disp_iovdd_gpio   set, rc=%d\n", panel->name,
+			panel->reset_config.disp_iovdd_gpio);
+	}
+#endif
 
 	if (gpio_is_valid(panel->reset_config.lcd_mode_sel_gpio))
 		gpio_set_value_cansleep(panel->reset_config.lcd_mode_sel_gpio, 0);
@@ -420,7 +486,6 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 			DSI_WARN("set dir for panel test gpio failed rc=%d\n",
 				 rc);
 	}
-
 	rc = dsi_panel_set_pinctrl_state(panel, false);
 	if (rc) {
 		DSI_ERR("[%s] failed set pinctrl state, rc=%d\n", panel->name,
@@ -431,7 +496,7 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 	if (rc)
 		DSI_ERR("[%s] failed to enable vregs, rc=%d\n",
 				panel->name, rc);
-
+}
 	return rc;
 }
 static int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
@@ -557,7 +622,7 @@ static int dsi_panel_wled_register(struct dsi_panel *panel,
 }
 
 static int dsi_panel_update_backlight(struct dsi_panel *panel,
-	u32 bl_lvl)
+	u32 bl_lvl, u8 hbm)
 {
 	int rc = 0;
 	unsigned long mode_flags = 0;
@@ -638,9 +703,10 @@ error:
 	return rc;
 }
 
-int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
+int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl,u8 hbm)
 {
 	int rc = 0;
+	int rh = 0;
 	struct dsi_backlight_config *bl = &panel->bl_config;
 
 	if (panel->host_config.ext_bridge_mode)
@@ -652,9 +718,22 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		rc = backlight_device_set_brightness(bl->raw_bd, bl_lvl);
 		break;
 	case DSI_BACKLIGHT_DCS:
-		rc = dsi_panel_update_backlight(panel, bl_lvl);
+		rc = dsi_panel_update_backlight(panel, bl_lvl, hbm);
 		break;
 	case DSI_BACKLIGHT_EXTERNAL:
+#if IS_ENABLED(CONFIG_LENOVO_BL_BOOSTER)
+
+	if(hbm) {
+	  rc = lcd_kit_set_brightness(2047);
+	  rh = lcd_kit_enable_hbm(1);
+            if(rh < 0) {
+	      rc = -ENOTSUPP;
+            }
+	} else {
+	  rc = lcd_kit_set_brightness(bl_lvl);
+	  rh = lcd_kit_enable_hbm(0);
+	}
+#endif
 		break;
 	case DSI_BACKLIGHT_PWM:
 		rc = dsi_panel_update_pwm_backlight(panel, bl_lvl);
@@ -1900,6 +1979,25 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
 	"qcom,mdss-dsi-calibration-commands",
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+	"qcom,mdss-dsi-dispparam-pen-disable-control-command",
+	"qcom,mdss-dsi-dispparam-pen-144hz-switch-command",
+	"qcom,mdss-dsi-dispparam-pen-165hz-switch-command",
+	"qcom,mdss-dsi-dispparam-pen-90hz-switch-command",
+	"qcom,mdss-dsi-dispparam-pen-enable-touch-command",
+	"qcom,mdss-dsi-dispparam-pen-others-enable-control-command",
+	"qcom,mdss-dsi-dispparam-pen-others-switch-command",
+	"qcom,mdss-dsi-dispparam-pen-144hz-power-on-command",
+	"qcom,mdss-dsi-dispparam-pen-165hz-power-on-command",
+	"qcom,mdss-dsi-dispparam-pen-90hz-power-on-command",
+#elif IS_ENABLED(CONFIG_ARCH_LAPIS)
+	"qcom,mdss-dsi-dispparam-pen-others-enable-control-command",
+	"qcom,mdss-dsi-dispparam-pen-others-switch-command",
+	"qcom,mdss-dsi-dispparam-pen-disable-control-command",
+	"qcom,mdss-dsi-dispparam-pen-disable-touch-command",
+	"qcom,mdss-dsi-dispparam-pen-enable-touch-command",
+	"qcom,mdss-dsi-dispparam-pen-144hz-90hz-power-on-command"
+#endif
 };
 
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
@@ -1929,6 +2027,25 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
 	"qcom,mdss-dsi-calibration-commands-state",
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+	"qcom,mdss-dsi-dispparam-pen-disable-control-command-state",
+	"qcom,mdss-dsi-dispparam-pen-144hz-switch-command-state",
+	"qcom,mdss-dsi-dispparam-pen-165hz-switch-command-state",
+	"qcom,mdss-dsi-dispparam-pen-190hz-switch-command-state",
+	"qcom,mdss-dsi-dispparam-pen-enable-touch-command-state",
+	"qcom,mdss-dsi-dispparam-pen-others-enable-control-command-state",
+	"qcom,mdss-dsi-dispparam-pen-others-switch-command-state",
+	"qcom,mdss-dsi-dispparam-pen-144hz-power-on-command-state",
+	"qcom,mdss-dsi-dispparam-pen-165hz-power-on-command-state",
+	"qcom,mdss-dsi-dispparam-pen-90hz-power-on-command-state",
+#elif IS_ENABLED(CONFIG_ARCH_LAPIS)
+	"qcom,mdss-dsi-dispparam-pen-others-enable-control-state",
+	"qcom,mdss-dsi-dispparam-pen-others-switch-state ",
+	"qcom,mdss-dsi-dispparam-pen-disable-control-state",
+	"qcom,mdss-dsi-dispparam-pen-disable-touch-state",
+	"qcom,mdss-dsi-dispparam-pen-enable-touch-state",
+	"qcom,mdss-dsi-dispparam-pen-144hz-90hz-power-on-command-state",
+#endif
 };
 
 int dsi_panel_get_cmd_pkt_count(const char *data, u32 length, u32 *cnt)
@@ -2456,7 +2573,37 @@ static int dsi_panel_parse_gpios(struct dsi_panel *panel)
 				 panel->name, rc);
 		}
 	}
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+	panel->reset_config.disp_iovdd_gpio = utils->get_named_gpio(utils->data,
+					      "qcom,platform-iovdd-gpio", 0);
+	if (!gpio_is_valid(panel->reset_config.disp_iovdd_gpio) )
+		DSI_ERR("[%s] iovdd gpio not set, rc=%d\n", panel->name, panel->reset_config.disp_iovdd_gpio);
+#endif
+	panel->reset_config.disp_enp_gpio = utils->get_named_gpio(utils->data,
+					      "qcom,platform-enp-gpio", 0);
+	if (!gpio_is_valid(panel->reset_config.disp_enp_gpio) )
+		DSI_ERR("[%s] enp gpio not set, rc=%d\n", panel->name, panel->reset_config.disp_enp_gpio);
 
+	panel->reset_config.disp_enn_gpio = utils->get_named_gpio(utils->data,
+					      "qcom,platform-enn-gpio", 0);
+	if (!gpio_is_valid(panel->reset_config.disp_enn_gpio) )
+		DSI_ERR("[%s] enn gpio not set, rc=%d\n", panel->name, panel->reset_config.disp_enn_gpio);
+
+	panel->reset_config.disp_blen_gpio = utils->get_named_gpio(utils->data,
+					      "qcom,platform-blen-gpio", 0);
+	if (!gpio_is_valid(panel->reset_config.disp_blen_gpio) )
+		DSI_ERR("[%s] blen gpio not set, rc=%d\n", panel->name, panel->reset_config.disp_blen_gpio);
+
+/*	panel->reset_config.disp_blen_gpio = utils->get_named_gpio(utils->data,
+					      "qcom,platform-blen-gpio", 0);
+	if (!gpio_is_valid(panel->reset_config.disp_blen_gpio) ) {
+		DSI_DEBUG("[%s] blen gpio not set, rc=%d\n", panel->name,
+			panel->reset_config.disp_blen_gpio);
+	} else {
+		DSI_ERR("[%s] parse blen gpio  get, gpio value=%d\n", panel->name,
+			gpio_get_value(panel->reset_config.disp_blen_gpio));
+	}
+*/
 	panel->reset_config.lcd_mode_sel_gpio = utils->get_named_gpio(
 		utils->data, mode_set_gpio_name, 0);
 	if (!gpio_is_valid(panel->reset_config.lcd_mode_sel_gpio))
@@ -3589,9 +3736,10 @@ static int dsi_panel_parse_esd_config(struct dsi_panel *panel)
 			if (panel->panel_mode == DSI_OP_CMD_MODE) {
 				esd_config->status_mode = ESD_MODE_PANEL_TE;
 			} else {
-				DSI_ERR("TE-ESD not valid for video mode\n");
-				rc = -EINVAL;
-				goto error;
+				esd_config->status_mode = ESD_MODE_PANEL_TE;
+				DSI_ERR("TE-ESD is for video mode\n");
+			//	rc = -EINVAL;
+			//	goto error;
 			}
 		} else if (!strcmp(string, "esd_sw_sim_success")) {
 			esd_config->status_mode = ESD_MODE_SW_SIM_SUCCESS;
@@ -5295,6 +5443,36 @@ int dsi_panel_post_enable(struct dsi_panel *panel)
 		goto error;
 	}
 error:
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+        if (panel->cur_mode->timing.refresh_rate == 144) {
+        	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_144HZ_POWER_ON);
+                if (rc) {
+                        DSI_ERR("[%s] failed to update TP fps code setting, rc=%d\n",
+                        panel->name, rc);
+                }
+        } else  if (panel->cur_mode->timing.refresh_rate == 165) {
+        	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_165HZ_POWER_ON);
+                if (rc) {
+                        DSI_ERR("[%s] failed to update TP fps code setting, rc=%d\n",
+                        panel->name, rc);
+                }
+        } else  if (panel->cur_mode->timing.refresh_rate == 90) {
+        rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_90HZ_POWER_ON);
+                if (rc) {
+                        DSI_ERR("[%s] failed to update TP fps code setting, rc=%d\n",
+                        panel->name, rc);
+                }
+        }
+#elif IS_ENABLED(CONFIG_ARCH_LAPIS)
+	if (panel->cur_mode->timing.refresh_rate == 144 || panel->cur_mode->timing.refresh_rate == 90){
+pr_info("dsi:power on Xuyn = 144 90 \n");
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_144HZ_90HZ_POWER_ON);
+		if (rc) {
+			DSI_ERR("[%s] failed to update TP fps code setting, rc=%d\n",
+			panel->name, rc);
+		}
+	}
+#endif
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -5407,7 +5585,91 @@ int dsi_panel_post_unprepare(struct dsi_panel *panel)
 		       panel->name, rc);
 		goto error;
 	}
+
 error:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+int dsi_panel_match_fps_pen_setting(struct dsi_panel *panel,
+                struct dsi_display_mode *adj_mode,int stages)
+{
+	int rc =0;
+
+	if (!panel || !panel->cur_mode || !adj_mode) {
+		DSI_ERR("invalid params\n");
+		return -EAGAIN;
+	}
+	switch (stages) {
+		case 1: //N - 1
+			if (adj_mode->timing.refresh_rate == 144 || adj_mode->timing.refresh_rate == 165 || adj_mode->timing.refresh_rate == 90) {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_DISABLE_CONTROL);
+			} else {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_OTHERS_ENABLE_CONTROL);
+			}
+			break;
+		case 2: //N, cmd + porch
+			 if (adj_mode->timing.refresh_rate == 165) {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_165HZ_SWITCH);
+			 } else if (adj_mode->timing.refresh_rate == 144) {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_144HZ_SWITCH);
+			 } else  if (adj_mode->timing.refresh_rate == 90) {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_90HZ_SWITCH);
+			 }  else {
+				 rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_OTHERS_SWITCH);
+			 }
+			 break;
+		case 3: //N + 1
+			 rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_ENABLE_TOUCH);
+			 break;
+		default:
+			pr_info("dsi: wrong stages = %d\n", stages);
+	}
+
+	if (rc) {
+		DSI_ERR("Failed to send DSI_CMD_SET_DISP_PEN_120HZ command\n");
+		return -EAGAIN;
+	}
+	return rc;
+
+}
+#elif IS_ENABLED(CONFIG_ARCH_LAPIS)
+int dsi_panel_match_fps_setting(struct dsi_panel *panel,
+                struct dsi_display_mode *adj_mode,int stages)
+{
+	int rc =0;
+
+	if (!panel || !panel->cur_mode || !adj_mode) {
+		DSI_ERR("invalid params\n");
+		return -EAGAIN;
+	}
+	switch (stages) {
+		case 1: //N - 1
+			if (adj_mode->timing.refresh_rate == 144 || adj_mode->timing.refresh_rate == 90) {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_DISABLE_CONTROL);
+			} else {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_OTHERS_ENABLE_CONTROL);
+			}
+			break;
+		case 2: //N, cmd + porch
+			 if (adj_mode->timing.refresh_rate == 144 || adj_mode->timing.refresh_rate == 90) {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_DISABLE_TOUCH);
+			 }  else {
+				 rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_OTHERS_SWITCH);
+			 }
+			 break;
+		case 3: //N + 1
+			 rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_ENABLE_TOUCH);
+			 break;
+		default:
+			pr_info("dsi: wrong stages = %d\n", stages);
+	}
+
+	if (rc) {
+		DSI_ERR("Failed to send DSI_CMD_SET_DISP_PEN_120HZ command\n");
+		return -EAGAIN;
+	}
+	return rc;
+
+}
+#endif

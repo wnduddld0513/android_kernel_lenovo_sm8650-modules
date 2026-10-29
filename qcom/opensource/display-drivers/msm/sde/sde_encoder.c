@@ -46,6 +46,9 @@
 #include "sde_encoder_dce.h"
 #include "sde_vm.h"
 #include "sde_fence.h"
+#include "../dsi/dsi_drm.h"
+#include "../dsi/dsi_panel.h"
+#include "../dsi/dsi_display.h"
 
 #define SDE_DEBUG_ENC(e, fmt, ...) SDE_DEBUG("enc%d " fmt,\
 		(e) ? (e)->base.base.id : -1, ##__VA_ARGS__)
@@ -5357,12 +5360,47 @@ end:
 	return ret;
 }
 
+int sde_encoder_vid_wait_for_active(
+			struct drm_encoder *drm_enc)
+{
+	struct drm_display_mode mode;
+	struct sde_encoder_virt *sde_enc = NULL;
+	u32 ln_cnt, min_ln_cnt, active_mark_region;
+	u32 i, retry = 15;
+	if (!drm_enc) {
+		SDE_ERROR("invalid encoder\n");
+		return -EINVAL;
+	}
+	sde_enc = to_sde_encoder_virt(drm_enc);
+	for (i = 0; i < sde_enc->num_phys_encs; i++) {
+		struct sde_encoder_phys *phys = sde_enc->phys_encs[i];
+		if (!phys || (phys->ops.is_master && !phys->ops.is_master(phys)))
+			continue;
+		mode = phys->cached_mode;
+		min_ln_cnt = (mode.vtotal - mode.vsync_start) +
+			(mode.vsync_end - mode.vsync_start);
+		active_mark_region = mode.vdisplay + min_ln_cnt - mode.vdisplay / 4;
+		while (retry) {
+			ln_cnt = phys->ops.get_line_count(phys);
+			if ((ln_cnt > min_ln_cnt) && (ln_cnt < active_mark_region))
+				return 0;
+			udelay(2000);
+			retry--;
+		}
+	}
+	return -EINVAL;
+}
+
 void sde_encoder_kickoff(struct drm_encoder *drm_enc, bool config_changed)
 {
 	struct sde_encoder_virt *sde_enc;
 	struct sde_encoder_phys *phys;
 	struct sde_kms *sde_kms;
 	unsigned int i;
+	struct drm_bridge *bridge = NULL;
+	struct dsi_bridge *c_bridge = NULL;
+	struct dsi_display *dsi_display = NULL;
+	struct dsi_display_mode adj_mode;
 
 	if (!drm_enc) {
 		SDE_ERROR("invalid encoder\n");
@@ -5398,6 +5436,36 @@ void sde_encoder_kickoff(struct drm_encoder *drm_enc, bool config_changed)
 	/* delay frame kickoff based on expected present time */
 	_sde_encoder_delay_kickoff_processing(sde_enc);
 
+	if (sde_enc->disp_info.intf_type == DRM_MODE_CONNECTOR_DSI) {
+		bridge = drm_bridge_chain_get_first_bridge(drm_enc);
+		if (!bridge) {
+			SDE_ERROR("sde_encoder_kickoff bridge is not available\n");
+			return;
+		}
+		c_bridge = container_of((bridge), struct dsi_bridge, base);
+		adj_mode = c_bridge->dsi_mode;
+		dsi_display = c_bridge->display;
+	}
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+	if (dsi_display && dsi_display->panel && (adj_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR)) {
+		mutex_lock(&dsi_display->panel->panel_lock);
+		//sde_encoder_wait_for_event(drm_enc,MSM_ENC_VBLANK);
+		sde_encoder_vid_wait_for_active(drm_enc);
+		dsi_panel_match_fps_pen_setting(dsi_display->panel, &adj_mode, 1);
+		sde_encoder_wait_for_event(drm_enc,MSM_ENC_VBLANK);
+		sde_encoder_vid_wait_for_active(drm_enc);
+
+	}
+#elif IS_ENABLED(CONFIG_ARCH_LAPIS)
+	if (dsi_display && dsi_display->panel && (adj_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR)) {
+		mutex_lock(&dsi_display->panel->panel_lock);
+		//sde_encoder_wait_for_event(drm_enc,MSM_ENC_VBLANK);
+		sde_encoder_vid_wait_for_active(drm_enc);
+		dsi_panel_match_fps_setting(dsi_display->panel, &adj_mode, 1);
+		sde_encoder_wait_for_event(drm_enc,MSM_ENC_VBLANK);
+		sde_encoder_vid_wait_for_active(drm_enc);
+	}
+#endif
 	/* All phys encs are ready to go, trigger the kickoff */
 	_sde_encoder_kickoff_phys(sde_enc, config_changed);
 
@@ -5407,7 +5475,28 @@ void sde_encoder_kickoff(struct drm_encoder *drm_enc, bool config_changed)
 		if (phys && phys->ops.handle_post_kickoff)
 			phys->ops.handle_post_kickoff(phys);
 	}
+#if IS_ENABLED(CONFIG_ARCH_KIRBY)
+	if (dsi_display && dsi_display->panel && (adj_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR)) {
+		dsi_panel_match_fps_pen_setting(dsi_display->panel, &adj_mode,2);
 
+		if ( adj_mode.timing.refresh_rate == 144 || adj_mode.timing.refresh_rate == 165 || adj_mode.timing.refresh_rate == 90) {
+			sde_encoder_wait_for_event(drm_enc,MSM_ENC_VBLANK);
+			sde_encoder_vid_wait_for_active(drm_enc);
+			dsi_panel_match_fps_pen_setting(dsi_display->panel, &adj_mode,3);
+		}
+		mutex_unlock(&dsi_display->panel->panel_lock);
+	}
+#elif IS_ENABLED(CONFIG_ARCH_LAPIS)
+	if (dsi_display && dsi_display->panel && (adj_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR)) {
+		dsi_panel_match_fps_setting(dsi_display->panel, &adj_mode, 2);
+		if ( adj_mode.timing.refresh_rate == 144 || adj_mode.timing.refresh_rate == 90) {
+			sde_encoder_wait_for_event(drm_enc,MSM_ENC_VBLANK);
+			sde_encoder_vid_wait_for_active(drm_enc);
+			dsi_panel_match_fps_setting(dsi_display->panel, &adj_mode, 3);
+		}
+		mutex_unlock(&dsi_display->panel->panel_lock);
+	}
+#endif
 	if (sde_enc->autorefresh_solver_disable &&
 			!_sde_encoder_is_autorefresh_enabled(sde_enc))
 		_sde_encoder_update_rsc_client(drm_enc, true);
