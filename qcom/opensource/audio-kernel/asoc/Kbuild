@@ -202,23 +202,8 @@ endif
 ifdef CONFIG_SND_SOC_PINEAPPLE
 	MACHINE_OBJS += pineapple.o
 
-ENV_VARIABLE_FILE := $(abspath ../../../../../../../../env_variable.txt)
-HQ_TARGET_PRODUCT := $(shell grep "HQ_TARGET_PRODUCT" $(ENV_VARIABLE_FILE) | cut -d'=' -f2)
-$(info get HQ_TARGET_PRODUCT: $(HQ_TARGET_PRODUCT) from ENV_VARIABLE_FILE: $(ENV_VARIABLE_FILE))
-
-ifneq ($(filter lapis_row lapis_prc,$(HQ_TARGET_PRODUCT)),)
-BUILD_LAPIS := y
-endif
 ifeq ($(CONFIG_ARCH_LAPIS),y)
-BUILD_LAPIS := y
-endif
-
-ifeq ($(BUILD_LAPIS),y)
 EXTRA_CFLAGS += -DBUILD_LAPIS_AUDIO
-$(info Add BUILD_LAPIS_AUDIO For Audio Kernel)
-else ifeq ($(HQ_TARGET_PRODUCT), $(filter $(HQ_TARGET_PRODUCT), kirby_row kirby_prc))
-EXTRA_CFLAGS += -DBUILD_KIRBY_AUDIO
-$(info Add BUILD_KIRBY_AUDIO For Audio Kernel)
 endif
 
 endif
