@@ -75,6 +75,15 @@ $(foreach cfg, $(WLAN_CFG_OVERRIDE), \
 	$(eval $(cfg)) \
 	$(warning "Overriding WLAN config with: $(cfg)"))
 
+# Kconfig selects WLAN_DISABLE_EXPORT_SYMBOL from WLAN_MULTI_CHIP_SUPPORT, but
+# an out-of-tree module build includes the profile defconfig directly and never
+# evaluates Kconfig, so apply the same rule here: otherwise every chip driver
+# built from this tree exports the same symbols and only the first one loaded
+# survives.
+ifeq ($(CONFIG_WLAN_MULTI_CHIP_SUPPORT), y)
+CONFIG_WLAN_DISABLE_EXPORT_SYMBOL := y
+endif
+
 # KERNEL_SUPPORTS_NESTED_COMPOSITES := y is used to enable nested
 # composite support. The nested composite support is available in some
 # MSM kernels, and is available in 5.10 GKI kernels beginning with
