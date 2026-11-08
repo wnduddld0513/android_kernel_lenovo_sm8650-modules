@@ -294,6 +294,9 @@ struct dsi_panel {
 	char dce_pps_cmd[DSI_CMD_PPS_SIZE];
 	enum dsi_dms_mode dms_mode;
 
+	/* CABC mode requested through the cabc sysfs node */
+	u32 cabc_mode;
+
 	struct dsi_panel_spr_info spr_info;
 
 	bool sync_broadcast_en;
@@ -391,6 +394,8 @@ int dsi_panel_unprepare(struct dsi_panel *panel);
 int dsi_panel_post_unprepare(struct dsi_panel *panel);
 
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl, u8 hbm);
+
+int dsi_panel_set_cabc_mode(struct dsi_panel *panel, u32 mode);
 
 int dsi_panel_update_pps(struct dsi_panel *panel);
 

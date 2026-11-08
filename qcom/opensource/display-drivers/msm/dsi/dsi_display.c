@@ -24,6 +24,7 @@
 #include "sde_dbg.h"
 #include "dsi_parser.h"
 #include <linux/hqsysfs.h>
+#include <linux/sysfs.h>
 
 #define to_dsi_display(x) container_of(x, struct dsi_display, host)
 #define INT_BASE_10 10
@@ -6217,6 +6218,68 @@ void set_panel_id(struct dsi_display_boot_param *boot_disp)
 	}
 }
 
+/**
+ * dsi_display_set_cabc_mode() - set the CABC mode of the display
+ * @display:	Handle to the dsi display.
+ * @mode:	CABC mode, one of enum dsi_cabc_mode.
+ *
+ * Return: 0 on success, or a negative error code.
+ */
+int dsi_display_set_cabc_mode(struct dsi_display *display, u32 mode)
+{
+	int rc;
+
+	if (!display || !display->panel)
+		return -EINVAL;
+
+	mutex_lock(&display->display_lock);
+	rc = dsi_panel_set_cabc_mode(display->panel, mode);
+	mutex_unlock(&display->display_lock);
+
+	return rc;
+}
+
+static ssize_t cabc_show(struct device *dev, struct device_attribute *attr,
+			 char *buf)
+{
+	struct dsi_display *display = dev_get_drvdata(dev);
+	u32 mode;
+
+	if (!display || !display->panel)
+		return -ENODEV;
+
+	mutex_lock(&display->display_lock);
+	mode = display->panel->cabc_mode;
+	mutex_unlock(&display->display_lock);
+
+	/* nothing requested yet: the panel stays on its own UI default */
+	return scnprintf(buf, PAGE_SIZE, "%d\n", mode != DSI_CABC_MODE_OFF);
+}
+
+static ssize_t cabc_store(struct device *dev, struct device_attribute *attr,
+			  const char *buf, size_t count)
+{
+	struct dsi_display *display = dev_get_drvdata(dev);
+	u32 val;
+	int rc;
+
+	rc = kstrtouint(buf, 0, &val);
+	if (rc)
+		return rc;
+
+	/*
+	 * LiveDisplay AdaptiveBacklight switch: 1 applies the CABC mode stock
+	 * uses by default on this panel (UI), 0 disables CABC.
+	 */
+	rc = dsi_display_set_cabc_mode(display,
+		val ? DSI_CABC_MODE_UI : DSI_CABC_MODE_OFF);
+	if (rc)
+		return rc;
+
+	return count;
+}
+static DEVICE_ATTR_RW(cabc);
+
 int dsi_display_dev_probe(struct platform_device *pdev)
 {
 	struct dsi_display *display = NULL;
@@ -6325,6 +6388,10 @@ int dsi_display_dev_probe(struct platform_device *pdev)
 			goto end;
 	}
 
+	/* only once probe can no longer fail and free the display */
+	if (sysfs_create_file(&pdev->dev.kobj, &dev_attr_cabc.attr))
+		DSI_ERR("failed to create cabc node\n");
+
 	return 0;
 end:
 	if (display)
@@ -6366,6 +6433,8 @@ int dsi_display_dev_remove(struct platform_device *pdev)
 	}
 
 	(void)_dsi_display_dev_deinit(display);
+
+	sysfs_remove_file(&pdev->dev.kobj, &dev_attr_cabc.attr);
 
 	platform_set_drvdata(pdev, NULL);
 	devm_kfree(&pdev->dev, display);

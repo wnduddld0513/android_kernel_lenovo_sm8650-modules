@@ -752,6 +752,72 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl,u8 hbm)
 	return rc;
 }
 
+static const char * const dsi_panel_cabc_mode_names[DSI_CABC_MODE_MAX] = {
+	[DSI_CABC_MODE_OFF] = "CABC MODE OFF",
+	[DSI_CABC_MODE_UI] = "CABC MODE UI",
+	[DSI_CABC_MODE_STILL] = "CABC MODE STILL",
+	[DSI_CABC_MODE_MOVE] = "CABC MODE MOVE",
+};
+
+static int dsi_panel_send_cabc_mode(struct dsi_panel *panel, u32 mode)
+{
+	int rc;
+
+	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_CABC_MODE_OFF + mode);
+	if (rc)
+		DSI_ERR("[%s] failed to send CABC cmd, rc=%d, mode=%d\n",
+		       panel->name, rc, mode);
+
+	return rc;
+}
+
+/**
+ * dsi_panel_set_cabc_mode() - apply a content adaptive backlight mode
+ * @panel:	pointer to the dsi panel
+ * @mode:	CABC mode, one of enum dsi_cabc_mode
+ *
+ * The four command sets come from the panel devicetree
+ * (qcom,mdss-dsi-cabc-mode-{off,ui,still,move}-commands), as stock ships
+ * them. The requested mode is kept in the panel, the panel on sequence
+ * resets CABC to UI on every power on and has to be followed by the mode
+ * that was requested while the panel was off.
+ *
+ * Return: 0 on success, or a negative error code.
+ */
+int dsi_panel_set_cabc_mode(struct dsi_panel *panel, u32 mode)
+{
+	int rc = 0;
+
+	if (!panel) {
+		DSI_ERR("invalid params\n");
+		return -EINVAL;
+	}
+
+	if (mode >= DSI_CABC_MODE_MAX) {
+		DSI_ERR("mode out of range: %d\n", mode);
+		return -EINVAL;
+	}
+
+	mutex_lock(&panel->panel_lock);
+
+	DSI_DEBUG("%s\n", dsi_panel_cabc_mode_names[mode]);
+
+	panel->cabc_mode = mode;
+
+	/*
+	 * The panel is powered down: sending DSI commands now would time out,
+	 * the mode is sent by dsi_panel_enable() instead.
+	 */
+	if (!panel->panel_initialized)
+		goto exit;
+
+	rc = dsi_panel_send_cabc_mode(panel, mode);
+
+exit:
+	mutex_unlock(&panel->panel_lock);
+	return rc;
+}
+
 static u32 dsi_panel_get_brightness(struct dsi_backlight_config *bl)
 {
 	u32 cur_bl_level;
@@ -1985,6 +2051,10 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
 	"qcom,mdss-dsi-calibration-commands",
+	"qcom,mdss-dsi-cabc-mode-off-commands",
+	"qcom,mdss-dsi-cabc-mode-ui-commands",
+	"qcom,mdss-dsi-cabc-mode-still-commands",
+	"qcom,mdss-dsi-cabc-mode-move-commands",
 #if IS_ENABLED(CONFIG_ARCH_KIRBY)
 	"qcom,mdss-dsi-dispparam-pen-disable-control-command",
 	"qcom,mdss-dsi-dispparam-pen-144hz-switch-command",
@@ -2033,6 +2103,10 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
 	"qcom,mdss-dsi-calibration-commands-state",
+	"qcom,mdss-dsi-cabc-mode-off-commands-state",
+	"qcom,mdss-dsi-cabc-mode-ui-commands-state",
+	"qcom,mdss-dsi-cabc-mode-still-commands-state",
+	"qcom,mdss-dsi-cabc-mode-move-commands-state",
 #if IS_ENABLED(CONFIG_ARCH_KIRBY)
 	"qcom,mdss-dsi-dispparam-pen-disable-control-command-state",
 	"qcom,mdss-dsi-dispparam-pen-144hz-switch-command-state",
@@ -4306,6 +4380,8 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 	}
 
 	panel->power_mode = SDE_MODE_DPMS_OFF;
+	/* no CABC mode requested yet, the panel on sequence sets UI */
+	panel->cabc_mode = DSI_CABC_MODE_MAX;
 	drm_panel_init(&panel->drm_panel, &panel->mipi_device.dev,
 			NULL, DRM_MODE_CONNECTOR_DSI);
 	panel->mipi_device.dev.of_node = of_node;
@@ -5437,6 +5513,15 @@ int dsi_panel_enable(struct dsi_panel *panel)
 		}
 	}
 	panel->panel_initialized = true;
+
+	/*
+	 * The on sequence sets CABC UI, re-apply the mode that was requested
+	 * through the cabc node while the panel was off.
+	 */
+	if (panel->cabc_mode < DSI_CABC_MODE_MAX &&
+	    dsi_panel_send_cabc_mode(panel, panel->cabc_mode))
+		DSI_DEBUG("[%s] failed to restore CABC mode %d\n",
+			  panel->name, panel->cabc_mode);
 
 error:
 	mutex_unlock(&panel->panel_lock);

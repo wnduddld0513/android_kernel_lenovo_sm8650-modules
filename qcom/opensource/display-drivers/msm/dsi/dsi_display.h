@@ -683,6 +683,13 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 		void *display, u32 bl_lvl, u8 hbm);
 
 /**
+ * dsi_display_set_cabc_mode() - set the CABC mode of the display
+ * @display:	Handle to the dsi display.
+ * @mode:	CABC mode, one of enum dsi_cabc_mode.
+ */
+int dsi_display_set_cabc_mode(struct dsi_display *display, u32 mode);
+
+/**
  * dsi_display_check_status() - check if panel is dead or alive
  * @connector:          Pointer to drm connector structure
  * @display:            Handle to display.

@@ -244,6 +244,22 @@ enum dsi_dyn_clk_feature_type {
 };
 
 /**
+ * enum dsi_cabc_mode - content adaptive backlight control mode
+ * @DSI_CABC_MODE_OFF:	Disable CABC
+ * @DSI_CABC_MODE_UI:	CABC tuned for UI content
+ * @DSI_CABC_MODE_STILL:	CABC tuned for still images
+ * @DSI_CABC_MODE_MOVE:	CABC tuned for moving content
+ * @DSI_CABC_MODE_MAX
+ */
+enum dsi_cabc_mode {
+	DSI_CABC_MODE_OFF = 0,
+	DSI_CABC_MODE_UI,
+	DSI_CABC_MODE_STILL,
+	DSI_CABC_MODE_MOVE,
+	DSI_CABC_MODE_MAX,
+};
+
+/**
  * enum dsi_cmd_set_type  - DSI command set type
  * @DSI_CMD_SET_PRE_ON:	                   Panel pre on
  * @DSI_CMD_SET_ON:                        Panel on
@@ -271,6 +287,10 @@ enum dsi_dyn_clk_feature_type {
  * @DSI_CMD_SET_QSYNC_ON                   Enable qsync mode
  * @DSI_CMD_SET_QSYNC_OFF                  Disable qsync mode
  * @DSI_CMD_SET_CALIBRATION_DATA           Panel calibration data
+ * @DSI_CMD_SET_CABC_MODE_OFF:	Disable CABC
+ * @DSI_CMD_SET_CABC_MODE_UI:	CABC UI mode
+ * @DSI_CMD_SET_CABC_MODE_STILL:	CABC still mode
+ * @DSI_CMD_SET_CABC_MODE_MOVE:	CABC move mode
  * @DSI_CMD_SET_MAX
  */
 enum dsi_cmd_set_type {
@@ -300,6 +320,10 @@ enum dsi_cmd_set_type {
 	DSI_CMD_SET_QSYNC_ON,
 	DSI_CMD_SET_QSYNC_OFF,
 	DSI_CMD_SET_CALIBRATION_DATA,
+	DSI_CMD_SET_CABC_MODE_OFF,
+	DSI_CMD_SET_CABC_MODE_UI,
+	DSI_CMD_SET_CABC_MODE_STILL,
+	DSI_CMD_SET_CABC_MODE_MOVE,
 #if IS_ENABLED(CONFIG_ARCH_KIRBY)
  	DSI_CMD_SET_DISP_PEN_DISABLE_CONTROL,
  	DSI_CMD_SET_DISP_PEN_144HZ_SWITCH,
