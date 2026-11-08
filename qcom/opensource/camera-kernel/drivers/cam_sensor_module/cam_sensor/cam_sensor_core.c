@@ -1050,6 +1050,32 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 	CAM_DBG(CAM_SENSOR, "%s read id: 0x%x expected id 0x%x:",
 		s_ctrl->sensor_name, chipid, slave_info->sensor_id);
 
+	/*
+	 * A GC13A2 answering with the bare chip id 0x13a2 keeps the module
+	 * variant byte at offset 0x18 of the EEPROM behind I2C address 0x50
+	 * (0x0a for the LCE module, 0x0b for the TXD one); the Lenovo sensor
+	 * module data already has that byte added to the expected id
+	 * (0x13ac / 0x13ad), so read it back and fold it out before the
+	 * masked compare.
+	 */
+	if (chipid == 0x13a2) {
+		struct cam_sensor_cci_client *cci_client =
+			s_ctrl->io_master_info.cci_client;
+		uint16_t sensor_sid = cci_client->sid;
+		uint32_t eeprom_data = 0;
+
+		cci_client->sid = 0x50;
+		rc = camera_io_dev_read(&(s_ctrl->io_master_info), 0x18,
+			&eeprom_data, CAMERA_SENSOR_I2C_TYPE_WORD,
+			CAMERA_SENSOR_I2C_TYPE_BYTE, true);
+		cci_client->sid = sensor_sid;
+
+		CAM_WARN(CAM_SENSOR,
+			"camera sensor_id: 0x%x eeprom  data: 0x%x ",
+			slave_info->sensor_id, eeprom_data);
+		slave_info->sensor_id -= eeprom_data;
+	}
+
 	if (cam_sensor_id_by_mask(s_ctrl, chipid) != slave_info->sensor_id) {
 		CAM_WARN(CAM_SENSOR, "%s read id: 0x%x expected id 0x%x:",
 				s_ctrl->sensor_name, chipid,
