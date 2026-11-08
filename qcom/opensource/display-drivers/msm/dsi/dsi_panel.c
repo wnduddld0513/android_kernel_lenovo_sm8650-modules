@@ -30,6 +30,12 @@
 #include <linux/lenovo-bl-booster.h>
 #endif
 extern bool nvt_gesture_flag;
+#if IS_ENABLED(CONFIG_ARCH_LAPIS)
+extern bool dsi_panel_enable_flag;
+extern bool nvt_ts_probe_flag;
+extern void nvt_nvt_update_firmware_work(struct completion *load_fw_completion);
+static struct completion load_fw_completion;
+#endif
 /**
  * topology is currently defined by a set of following 3 values:
  * 1. num of layer mixers
@@ -5394,6 +5400,18 @@ int dsi_panel_enable(struct dsi_panel *panel)
 		return -EINVAL;
 	}
 
+#if IS_ENABLED(CONFIG_ARCH_LAPIS)
+	/*
+	 * The NT36532 TDDI touch is flashless and loses its firmware whenever
+	 * the panel is powered down; nt36xxx downloads it only once at probe
+	 * and leaves the later downloads to the panel driver, as stock does.
+	 */
+	if (dsi_panel_enable_flag) {
+		init_completion(&load_fw_completion);
+		nvt_nvt_update_firmware_work(&load_fw_completion);
+		nvt_ts_probe_flag = false;
+	}
+#endif
 	mutex_lock(&panel->panel_lock);
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
