@@ -261,6 +261,35 @@ static ssize_t hbm_store(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR_RW(hbm);
 #endif
 
+/*
+ * Stock panel CABC node: write-only, takes enum dsi_cabc_mode (0 off, 1 UI,
+ * 2 still, 3 moving content), as the stock cabc_mode_store does for the
+ * Lenovo display HAL.
+ */
+static ssize_t cabc_mode_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct backlight_device *bd = to_backlight_device(dev);
+	struct sde_connector *c_conn = bl_get_data(bd);
+	unsigned int mode;
+	int rc;
+
+	rc = kstrtouint(buf, 0, &mode);
+	if (rc)
+		return rc;
+	if (mode >= DSI_CABC_MODE_MAX)
+		return -EINVAL;
+
+	SDE_DEBUG("cabc_mode: %u, count: %zu\n", mode, count);
+	rc = dsi_display_set_cabc_mode(c_conn->display, mode);
+	if (rc)
+		return rc;
+
+	return count;
+}
+static DEVICE_ATTR_WO(cabc_mode);
+
 static int sde_backlight_setup(struct sde_connector *c_conn,
 					struct drm_device *dev)
 {
@@ -306,6 +335,8 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 	if (device_create_file(&c_conn->bl_device->dev, &dev_attr_hbm))
 		SDE_ERROR("Failed to create hbm_mode node\n");
 #endif
+	if (device_create_file(&c_conn->bl_device->dev, &dev_attr_cabc_mode))
+		SDE_ERROR("Failed to create cabc_mode node\n");
 
 	/**
 	 * In TVM, thermal cooling device is not enabled. Registering with dummy
