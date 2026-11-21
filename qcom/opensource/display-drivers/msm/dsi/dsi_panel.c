@@ -772,15 +772,33 @@ static int dsi_panel_send_cabc_mode(struct dsi_panel *panel, u32 mode)
 }
 
 /**
+ * dsi_panel_remember_cabc_mode() - record a requested CABC mode
+ * @panel:	pointer to the dsi panel
+ * @mode:	CABC mode, one of enum dsi_cabc_mode
+ *
+ * The mode is recorded even when it cannot be sent to the panel yet, so
+ * dsi_panel_enable() can apply it after the next on sequence.
+ */
+void dsi_panel_remember_cabc_mode(struct dsi_panel *panel, u32 mode)
+{
+	if (!panel || mode >= DSI_CABC_MODE_MAX)
+		return;
+
+	mutex_lock(&panel->panel_lock);
+	panel->cabc_mode = mode;
+	mutex_unlock(&panel->panel_lock);
+}
+
+/**
  * dsi_panel_set_cabc_mode() - apply a content adaptive backlight mode
  * @panel:	pointer to the dsi panel
  * @mode:	CABC mode, one of enum dsi_cabc_mode
  *
  * The four command sets come from the panel devicetree
- * (qcom,mdss-dsi-cabc-mode-{off,ui,still,move}-commands), as stock ships
- * them. The requested mode is kept in the panel, the panel on sequence
- * resets CABC to UI on every power on and has to be followed by the mode
- * that was requested while the panel was off.
+ * (qcom,mdss-dsi-cabc-mode-{off,ui,still,move}-commands). The requested
+ * mode is kept in the panel: the on sequence resets CABC to UI on every
+ * power on, so dsi_panel_enable() applies the last requested mode after
+ * the on sequence.
  *
  * Return: 0 on success, or a negative error code.
  */
@@ -800,16 +818,15 @@ int dsi_panel_set_cabc_mode(struct dsi_panel *panel, u32 mode)
 
 	mutex_lock(&panel->panel_lock);
 
-	DSI_DEBUG("%s\n", dsi_panel_cabc_mode_names[mode]);
-
 	panel->cabc_mode = mode;
 
-	/*
-	 * The panel is powered down: sending DSI commands now would time out,
-	 * the mode is sent by dsi_panel_enable() instead.
-	 */
-	if (!panel->panel_initialized)
+	/* the panel is powered down, the mode is sent by dsi_panel_enable() */
+	if (!panel->panel_initialized) {
+		DSI_ERR("panel is uninitialized\n");
 		goto exit;
+	}
+
+	DSI_DEBUG("%s\n", dsi_panel_cabc_mode_names[mode]);
 
 	rc = dsi_panel_send_cabc_mode(panel, mode);
 
@@ -5480,7 +5497,7 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	/*
 	 * The NT36532 TDDI touch is flashless and loses its firmware whenever
 	 * the panel is powered down; nt36xxx downloads it only once at probe
-	 * and leaves the later downloads to the panel driver, as stock does.
+	 * and leaves the later downloads to the panel driver.
 	 */
 	if (dsi_panel_enable_flag) {
 		init_completion(&load_fw_completion);
@@ -5516,7 +5533,7 @@ int dsi_panel_enable(struct dsi_panel *panel)
 
 	/*
 	 * The on sequence sets CABC UI, re-apply the mode that was requested
-	 * through the cabc node while the panel was off.
+	 * through the CABC nodes while the panel was off.
 	 */
 	if (panel->cabc_mode < DSI_CABC_MODE_MAX &&
 	    dsi_panel_send_cabc_mode(panel, panel->cabc_mode))

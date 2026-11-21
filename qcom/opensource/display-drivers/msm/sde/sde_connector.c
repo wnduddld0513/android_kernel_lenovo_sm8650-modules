@@ -262,29 +262,40 @@ static DEVICE_ATTR_RW(hbm);
 #endif
 
 /*
- * Stock panel CABC node: write-only, takes enum dsi_cabc_mode (0 off, 1 UI,
- * 2 still, 3 moving content), as the stock cabc_mode_store does for the
- * Lenovo display HAL.
+ * Panel CABC node: write-only, takes enum dsi_cabc_mode (0 off, 1 UI,
+ * 2 still, 3 moving content). Written by the Lenovo display HAL.
  */
+static int sde_connector_set_cabc_mode(struct sde_connector *c_conn, u32 mode)
+{
+	struct dsi_display *display = c_conn->display;
+
+	if (c_conn->lp_mode == SDE_MODE_DPMS_ON)
+		return dsi_display_set_cabc_mode(display, mode);
+
+	SDE_ERROR("connector is set off\n");
+	if (display)
+		dsi_panel_remember_cabc_mode(display->panel, mode);
+
+	return -EBUSY;
+}
+
 static ssize_t cabc_mode_store(struct device *dev,
 			       struct device_attribute *attr,
 			       const char *buf, size_t count)
 {
 	struct backlight_device *bd = to_backlight_device(dev);
 	struct sde_connector *c_conn = bl_get_data(bd);
-	unsigned int mode;
+	unsigned long long mode = 0;
 	int rc;
 
-	rc = kstrtouint(buf, 0, &mode);
-	if (rc)
-		return rc;
-	if (mode >= DSI_CABC_MODE_MAX)
+	rc = kstrtoull(buf, 0, &mode);
+	if (rc) {
+		SDE_ERROR("mode transfer error\n");
 		return -EINVAL;
+	}
 
-	SDE_DEBUG("cabc_mode: %u, count: %zu\n", mode, count);
-	rc = dsi_display_set_cabc_mode(c_conn->display, mode);
-	if (rc)
-		return rc;
+	SDE_DEBUG("cabc_mode: %d, count : %d", (int)mode, (int)count);
+	sde_connector_set_cabc_mode(c_conn, (u32)mode);
 
 	return count;
 }

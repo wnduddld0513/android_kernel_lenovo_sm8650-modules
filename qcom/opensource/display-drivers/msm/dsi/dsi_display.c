@@ -6223,7 +6223,11 @@ void set_panel_id(struct dsi_display_boot_param *boot_disp)
  * @display:	Handle to the dsi display.
  * @mode:	CABC mode, one of enum dsi_cabc_mode.
  *
- * Return: 0 on success, or a negative error code.
+ * A mode requested while the display is suspended is kept and applied by
+ * the next panel enable.
+ *
+ * Return: 0 on success, -EBUSY if the display is suspended, or a negative
+ * error code.
  */
 int dsi_display_set_cabc_mode(struct dsi_display *display, u32 mode)
 {
@@ -6233,7 +6237,15 @@ int dsi_display_set_cabc_mode(struct dsi_display *display, u32 mode)
 		return -EINVAL;
 
 	mutex_lock(&display->display_lock);
-	rc = dsi_panel_set_cabc_mode(display->panel, mode);
+
+	if (sde_kms_is_suspend_blocked(display->drm_dev)) {
+		DSI_ERR("suspend blocked, not send cabc cmd");
+		dsi_panel_remember_cabc_mode(display->panel, mode);
+		rc = -EBUSY;
+	} else {
+		rc = dsi_panel_set_cabc_mode(display->panel, mode);
+	}
+
 	mutex_unlock(&display->display_lock);
 
 	return rc;
@@ -6248,9 +6260,9 @@ static ssize_t cabc_show(struct device *dev, struct device_attribute *attr,
 	if (!display || !display->panel)
 		return -ENODEV;
 
-	mutex_lock(&display->display_lock);
+	mutex_lock(&display->panel->panel_lock);
 	mode = display->panel->cabc_mode;
-	mutex_unlock(&display->display_lock);
+	mutex_unlock(&display->panel->panel_lock);
 
 	/* nothing requested yet: the panel stays on its own UI default */
 	return scnprintf(buf, PAGE_SIZE, "%d\n", mode != DSI_CABC_MODE_OFF);
@@ -6268,8 +6280,8 @@ static ssize_t cabc_store(struct device *dev, struct device_attribute *attr,
 		return rc;
 
 	/*
-	 * LiveDisplay AdaptiveBacklight switch: 1 applies the CABC mode stock
-	 * uses by default on this panel (UI), 0 disables CABC.
+	 * LiveDisplay AdaptiveBacklight switch: 1 applies CABC UI, the mode
+	 * the panel on sequence programs, 0 disables CABC.
 	 */
 	rc = dsi_display_set_cabc_mode(display,
 		val ? DSI_CABC_MODE_UI : DSI_CABC_MODE_OFF);
