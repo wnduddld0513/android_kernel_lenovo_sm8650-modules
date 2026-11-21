@@ -9,6 +9,7 @@
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/i2c.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
@@ -39,7 +40,6 @@ static const struct cam_ldo_info lapis_wl2868c_info = {
 	},
 	.table = lapis_wl2868c_table,
 	.table_len = ARRAY_SIZE(lapis_wl2868c_table),
-	.ignore_init_err = true,
 };
 
 static struct cam_ldo_chip *lapis_wl2868c_chip;
@@ -91,20 +91,23 @@ static int lapis_wl2868c_probe(struct i2c_client *client)
 	struct cam_ldo_chip *chip;
 	int rc;
 
+	pr_info("%s,enrty\n", __func__);
+
 	chip = cam_ldo_chip_create(client, &lapis_wl2868c_info);
 	if (IS_ERR(chip))
 		return PTR_ERR(chip);
 
 	chip->en_gpio = of_get_named_gpio(client->dev.of_node, "en-gpio", 0);
 	if (!gpio_is_valid(chip->en_gpio)) {
-		dev_err(chip->dev, "%s: en gpio not specified\n", __func__);
-		return -EINVAL;
+		pr_err("%s:%d, en gpio not specified\n", __func__, __LINE__);
+		return 0;
 	}
+	pr_info("%s: en_gpio is %d\n", __func__, chip->en_gpio);
 
 	rc = devm_gpio_request(chip->dev, chip->en_gpio, "lapis_wl2868c_en");
 	if (rc < 0) {
-		dev_err(chip->dev, "enable gpio request failed\n");
-		return rc;
+		pr_err("lapis wl2868c enable gpio request failed\n");
+		return 0;
 	}
 
 	/* enable the PMIC, pulse the enable line to restart it */
@@ -128,6 +131,7 @@ static int lapis_wl2868c_probe(struct i2c_client *client)
 	}
 
 	lapis_wl2868c_chip = chip;
+	pr_info("%s,successfully\n", __func__);
 
 	return 0;
 }
@@ -151,7 +155,7 @@ MODULE_DEVICE_TABLE(of, lapis_wl2868c_of_match);
 
 static struct i2c_driver lapis_wl2868c_driver = {
 	.driver = {
-		.name = "lapis_wl2868c",
+		.name = "qcom,ic_wl2868c",
 		.of_match_table = lapis_wl2868c_of_match,
 	},
 	.probe_new = lapis_wl2868c_probe,

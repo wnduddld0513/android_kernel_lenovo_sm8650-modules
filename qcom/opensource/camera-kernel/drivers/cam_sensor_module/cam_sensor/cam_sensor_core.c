@@ -1070,7 +1070,7 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 			CAMERA_SENSOR_I2C_TYPE_BYTE, true);
 		cci_client->sid = sensor_sid;
 
-		CAM_WARN(CAM_SENSOR,
+		CAM_INFO(CAM_SENSOR,
 			"camera sensor_id: 0x%x eeprom  data: 0x%x ",
 			slave_info->sensor_id, eeprom_data);
 		slave_info->sensor_id -= eeprom_data;

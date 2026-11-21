@@ -6,6 +6,7 @@
  */
 
 #include <linux/i2c.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
 
@@ -85,6 +86,8 @@ static int wl2866d_probe(struct i2c_client *client)
 	struct cam_ldo_chip *chip;
 	int rc;
 
+	pr_info("%s,enrty\n", __func__);
+
 	chip = cam_ldo_chip_create(client, &wl2866d_info);
 	if (IS_ERR(chip))
 		return PTR_ERR(chip);
@@ -109,6 +112,7 @@ static int wl2866d_probe(struct i2c_client *client)
 	}
 
 	wl2866d_chip = chip;
+	pr_info("%s,successfully\n", __func__);
 
 	return 0;
 }
@@ -126,14 +130,13 @@ MODULE_DEVICE_TABLE(i2c, wl2866d_id_table);
 
 static const struct of_device_id wl2866d_of_match[] = {
 	{ .compatible = "vendor,wl2868c" },
-	{ .compatible = "lenovo,wl2868c" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, wl2866d_of_match);
 
 static struct i2c_driver wl2866d_driver = {
 	.driver = {
-		.name = "wl2866d",
+		.name = "vendor,wl2868c",
 		.of_match_table = wl2866d_of_match,
 	},
 	.probe_new = wl2866d_probe,

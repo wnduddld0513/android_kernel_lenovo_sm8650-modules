@@ -2,13 +2,10 @@
 /*
  * (C) 2026 The LineageOS Project
  *
- * Camera sensor LDO PMICs of the Lenovo TB520FU (lapis).
- *
- * Re-implementation of the camera LDO power control found in the stock
- * camera.ko (Lenovo ZUI 18.5.10.037): one table-driven core and three thin
- * I2C drivers (Willsemi WL2868C as wired on lapis, Willsemi WL2866D and ETEK
- * ET5907). A "port" is the index of the LDO in the sequence type
- * SENSOR_LDO1 .. SENSOR_LDO1P1 of the sensor power settings.
+ * Camera sensor LDO PMICs of the Lenovo TB520FU (lapis): one table-driven
+ * core and three thin I2C drivers (Willsemi WL2868C as wired on lapis,
+ * Willsemi WL2866D and ETEK ET5907). A "port" is the index of the LDO in the
+ * sequence type SENSOR_LDO1 .. SENSOR_LDO1P1 of the sensor power settings.
  */
 
 #ifndef _CAM_LDO_H_
@@ -51,7 +48,6 @@ struct cam_ldo_reg_val {
  * @table:           register writes done by the "power up all" entry points
  * @table_len:       number of entries of @table
  * @settle:          wait and dump the registers after the initialisation
- * @ignore_init_err: carry on when the initial register writes fail
  */
 struct cam_ldo_info {
 	const char *name;
@@ -62,11 +58,11 @@ struct cam_ldo_info {
 	const struct cam_ldo_reg_val *table;
 	int table_len;
 	bool settle;
-	bool ignore_init_err;
 };
 
 struct cam_ldo_attr {
 	struct device_attribute attr;
+	const char *err;
 	u8 reg;
 };
 

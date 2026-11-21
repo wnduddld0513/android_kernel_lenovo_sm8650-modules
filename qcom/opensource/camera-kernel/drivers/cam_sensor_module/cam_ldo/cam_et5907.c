@@ -6,6 +6,7 @@
  */
 
 #include <linux/i2c.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
 
@@ -70,6 +71,8 @@ static int et5907_probe(struct i2c_client *client)
 	struct cam_ldo_chip *chip;
 	int rc;
 
+	pr_info("%s,enrty\n", __func__);
+
 	chip = cam_ldo_chip_create(client, &et5907_info);
 	if (IS_ERR(chip))
 		return PTR_ERR(chip);
@@ -94,6 +97,7 @@ static int et5907_probe(struct i2c_client *client)
 	}
 
 	et5907_chip = chip;
+	pr_info("%s,successfully\n", __func__);
 
 	return 0;
 }
@@ -111,14 +115,13 @@ MODULE_DEVICE_TABLE(i2c, et5907_id_table);
 
 static const struct of_device_id et5907_of_match[] = {
 	{ .compatible = "vendor,et5907" },
-	{ .compatible = "vendor,et5907s" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, et5907_of_match);
 
 static struct i2c_driver et5907_driver = {
 	.driver = {
-		.name = "et5907",
+		.name = "vendor,et5907",
 		.of_match_table = et5907_of_match,
 	},
 	.probe_new = et5907_probe,
