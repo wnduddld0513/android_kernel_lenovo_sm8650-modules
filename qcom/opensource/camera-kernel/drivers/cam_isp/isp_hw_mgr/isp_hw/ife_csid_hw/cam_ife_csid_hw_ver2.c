@@ -5747,6 +5747,7 @@ int cam_ife_csid_ver2_stop(void *hw_priv,
 	atomic_set(&csid_hw->discard_frame_per_path, 0);
 	mutex_lock(&csid_hw->hw_info->hw_mutex);
 
+	spin_lock_bh(&csid_hw->lock_state);
 	/* Mask out all irqs from HW */
 	cam_ife_csid_ver2_maskout_all_irqs(csid_hw, csid_stop);
 
@@ -5760,6 +5761,8 @@ int cam_ife_csid_ver2_stop(void *hw_priv,
 			res->res_type, res->res_id,
 			res->res_name);
 	}
+	spin_unlock_bh(&csid_hw->lock_state);
+
 	if (csid_hw->buf_done_irq_handle) {
 		rc = cam_irq_controller_unsubscribe_irq_evt(
 			csid_hw->top_irq_controller[CAM_IFE_CSID_TOP_IRQ_STATUS_REG0],
